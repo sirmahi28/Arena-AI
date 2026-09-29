@@ -15,6 +15,7 @@
     "test:boosters": "node tools/booster-sim.mjs 1200",
     "test:calibrate": "node tools/board-sim.mjs 300 --calibrate",
     "shots": "node tools/shots.mjs",
+    "fx": "node tools/fx-probe.mjs tools/fx-out",
     "setup:chromium": "node tools/setup-chromium.mjs",
     "art": "node tools/build-art.mjs"
   },

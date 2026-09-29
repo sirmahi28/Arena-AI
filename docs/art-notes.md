@@ -239,3 +239,39 @@ than being drawn twice.
 The logo replaces the drawn title **on the menu only**. The win and lose
 banners still use canvas text, because their wording changes and two more
 pieces of art would cost more than they return.
+
+## Particles: brightness is not quality
+
+The candy art is painted; everything thrown *off* a candy is still code. That
+code went through a pass aimed at making it look more expensive, and the
+lesson was that nearly every lever worth pulling reduced light rather than
+adding it.
+
+The failure mode is specific and worth naming. Additive blending drives
+overlapping particles toward white. Any white already in the source therefore
+compounds, and past a fairly low threshold every effect in the game converges
+on the same colourless flare — maximum glow carrying zero information about
+what just happened. A burst that cannot tell you *which candy* exploded is a
+burst that has stopped doing its job.
+
+So the glow sprite keeps its hue (core pushed only 55% toward white, tight
+falloff instead of a linear ramp), white was pulled out of twelve of the
+fourteen emitters that seeded it, shockwave rings went from two per pop to
+one, and rings are drawn as four stacked strokes approximating a gradient
+rather than one hard circle.
+
+The additions were all shape rather than brightness: a four-point glint
+sprite, a lit facet on each shard, per-shape decay envelopes, and a flicker
+term. A two-pixel round blob is indistinguishable from a dead pixel; a
+two-pixel *spiked* blob reads as a highlight. That distinction is most of
+what separates a cheap particle system from an expensive-looking one.
+
+One trap found along the way: the first version of the shard shading split
+each chip into a lit half and a shaded half, which is how you shade a large
+object. On a 10px chip flying over a dark board it reads as dirt, and on the
+yellow candy the shaded half turned the debris olive. A silhouette against a
+dark background does not need a dark side — it needs a bright one.
+
+Compare versions with `npm run fx`, which fires one named effect and captures
+the board at fixed offsets. Screenshot tooling that catches an arbitrary
+frame cannot evaluate something that lives for 400 ms.

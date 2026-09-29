@@ -10,8 +10,9 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# Visual-test output (regenerate with `npm run shots`)
+# Visual-test output (regenerate with `npm run shots` / `npm run fx`)
 tools/shots/
+tools/fx-*/
 dist-standalone/.raw/
 
 # Raw generated art (~2.7 MB). Only the optimised src/assets/*.webp ship.

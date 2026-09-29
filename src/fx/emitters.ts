@@ -4,6 +4,20 @@ import { rand } from '../core/rng';
 
 const TAU = Math.PI * 2;
 
+/*
+ * A note on white.
+ *
+ * Pure white was previously mixed into almost every burst, on the theory
+ * that white = bright = exciting. It does the opposite. Additive blending
+ * already drives overlapping particles toward white, so seeding white on top
+ * of that guarantees every effect collapses into the same colourless flare —
+ * a red candy and a blue candy explode identically.
+ *
+ * Bursts now use the candy's own bright tint instead, and white appears only
+ * where nothing else can do the job: the leading edge of a shockwave, and
+ * confetti, which is unlit paper rather than light.
+ */
+
 /**
  * Preset bursts. Every visual "event" in the game routes through here so the
  * look stays consistent and tuning is one place.
@@ -19,10 +33,10 @@ export const FX = {
       x,
       y,
       count: Math.round(9 * power),
-      spread: cell * 0.18,
-      speed: [110 * power, 360 * power],
+      spread: cell * 0.22,
+      speed: [120 * power, 380 * power],
       life: [0.36, 0.72],
-      size: [cell * 0.08, cell * 0.19],
+      size: [cell * 0.06, cell * 0.145],
       sizeEnd: 0,
       gravity: 980,
       drag: 0.32,
@@ -45,7 +59,7 @@ export const FX = {
       sizeEnd: 0,
       gravity: 90,
       drag: 0.92,
-      colors: [light, spark, '#ffffff'],
+      colors: [light, spark, base],
       shape: 'spark',
       additive: true,
     });
@@ -62,12 +76,14 @@ export const FX = {
       sizeEnd: 0,
       gravity: 0,
       drag: 0.6,
-      colors: [spark, '#ffffff'],
+      colors: [spark, light],
       shape: 'streak',
       additive: true,
     });
 
-    // 4. Twinkling stars, a handful, slow enough to actually register.
+    // 4. A few shaped glints, slow enough to actually register. These are
+    //    the premium note in the whole burst: four-point highlights read as
+    //    deliberate craft where another soft blob would read as noise.
     ps.emit({
       x,
       y,
@@ -75,58 +91,68 @@ export const FX = {
       spread: cell * 0.3,
       speed: [40, 170 * power],
       life: [0.3, 0.62],
-      size: [cell * 0.1, cell * 0.2],
+      size: [cell * 0.07, cell * 0.13],
       sizeEnd: 0,
       gravity: 60,
       drag: 1.1,
-      colors: ['#ffffff', spark, light],
-      shape: 'star',
+      colors: [spark, light],
+      shape: 'glint',
       additive: true,
-      spin: [-7, 7],
+      spin: [-2.5, 2.5],
     });
 
-    // 5. Primary shockwave.
+    /*
+     * 5. Shockwave — but only one, and only a faint one.
+     *
+     * This used to be a double pulse, which looks great on a single candy
+     * and awful everywhere else: `candyPop` runs once per cleared candy, so
+     * a colour bomb taking out ten reds drew twenty expanding circles and
+     * the board turned into a field of soap bubbles. A ring is a punctuation
+     * mark. Spend it once per pop, keep it thin, and let the second pulse be
+     * something a *big* pop earns rather than something every pop gets.
+     */
     ps.emit({
       x,
       y,
       count: 1,
       speed: [0, 0],
-      life: [0.3, 0.3],
+      life: [0.26, 0.26],
       size: [cell * 0.18, cell * 0.18],
-      sizeEnd: cell * 1.05 * power,
+      sizeEnd: cell * 0.92 * power,
       colors: [light],
       shape: 'ring',
       additive: true,
-      thickness: cell * 0.1,
+      thickness: cell * 0.055,
     });
 
-    // 6. Second, faster, thinner ring — a double pulse reads far punchier
-    //    than one ring, for one extra particle.
-    ps.emit({
-      x,
-      y,
-      count: 1,
-      speed: [0, 0],
-      life: [0.19, 0.19],
-      size: [cell * 0.1, cell * 0.1],
-      sizeEnd: cell * 0.72 * power,
-      colors: ['#ffffff'],
-      shape: 'ring',
-      additive: true,
-      thickness: cell * 0.045,
-    });
+    // 6. The second pulse, reserved for boosted pops (cascades, specials).
+    if (power > 1.08) {
+      ps.emit({
+        x,
+        y,
+        count: 1,
+        speed: [0, 0],
+        life: [0.19, 0.19],
+        size: [cell * 0.1, cell * 0.1],
+        sizeEnd: cell * 0.72 * power,
+        colors: [spark],
+        shape: 'ring',
+        additive: true,
+        thickness: cell * 0.035,
+      });
+    }
 
     // 7. Sugar-dust puff drifting up. Light palette entries only — the dark
     //    ones read as muddy brown smudges against the deep purple board.
     ps.emit({
       x,
       y,
-      count: Math.round(3 * power),
-      spread: cell * 0.3,
-      speed: [10, 60],
-      life: [0.38, 0.66],
-      size: [cell * 0.16, cell * 0.3],
-      sizeEnd: cell * 0.5,
+      count: Math.round(2 * power),
+      spread: cell * 0.26,
+      speed: [10, 55],
+      life: [0.3, 0.52],
+      size: [cell * 0.13, cell * 0.22],
+      sizeEnd: cell * 0.38,
       gravity: -80,
       drag: 1.5,
       colors: [light, base],
@@ -149,7 +175,7 @@ export const FX = {
       sizeEnd: 0,
       gravity: 700,
       drag: 0.4,
-      colors: [light, spark, base, '#ffffff'],
+      colors: [light, spark, base],
       shape: 'star',
       additive: true,
       spin: [-12, 12],
@@ -180,7 +206,7 @@ export const FX = {
         size: [cell * 0.09, cell * 0.24],
         sizeEnd: 0,
         drag: 1.6,
-        colors: ['#ffffff', light, spark, base],
+        colors: [light, spark, base],
         shape: 'streak',
         additive: true,
         stretch: 2.4,
@@ -194,10 +220,10 @@ export const FX = {
       life: [0.35, 0.45],
       size: [cell * 0.2, cell * 0.3],
       sizeEnd: cell * 2.2,
-      colors: ['#ffffff', light],
+      colors: [spark, light],
       shape: 'ring',
       additive: true,
-      thickness: cell * 0.14,
+      thickness: cell * 0.08,
     });
   },
 
@@ -208,15 +234,15 @@ export const FX = {
     ps.emit({
       x,
       y,
-      count: 30,
-      spread: cell * 0.25,
-      speed: [220, 780],
+      count: 26,
+      spread: cell * 0.34,
+      speed: [260, 820],
       life: [0.35, 0.75],
-      size: [cell * 0.08, cell * 0.22],
+      size: [cell * 0.06, cell * 0.16],
       sizeEnd: 0,
       gravity: 800,
       drag: 0.5,
-      colors: [base, light, spark, '#ffffff'],
+      colors: [base, light, spark],
       shape: 'shard',
       additive: false,
       spin: [-18, 18],
@@ -232,7 +258,7 @@ export const FX = {
       size: [cell * 0.08, cell * 0.24],
       sizeEnd: 0,
       drag: 1.1,
-      colors: ['#ffffff', light, spark],
+      colors: [light, spark],
       shape: 'spark',
       additive: true,
     });
@@ -240,26 +266,43 @@ export const FX = {
     ps.emit({
       x,
       y,
-      count: 3,
+      count: 2,
       speed: [0, 0],
       life: [0.42, 0.55],
       size: [cell * 0.25, cell * 0.4],
       sizeEnd: cell * 3.1,
-      colors: ['#ffffff', light, base],
+      colors: [spark, light],
       shape: 'ring',
       additive: true,
-      thickness: cell * 0.2,
+      thickness: cell * 0.11,
+    });
+
+    // Shaped glints riding the blast front.
+    ps.emit({
+      x,
+      y,
+      count: 6,
+      spread: cell * 0.3,
+      speed: [120, 430],
+      life: [0.3, 0.6],
+      size: [cell * 0.08, cell * 0.14],
+      sizeEnd: 0,
+      drag: 1.0,
+      colors: [spark, light],
+      shape: 'glint',
+      additive: true,
+      spin: [-3, 3],
     });
 
     ps.emit({
       x,
       y,
-      count: 9,
-      spread: cell * 0.55,
-      speed: [40, 180],
-      life: [0.45, 0.85],
-      size: [cell * 0.3, cell * 0.5],
-      sizeEnd: cell * 1.15,
+      count: 5,
+      spread: cell * 0.5,
+      speed: [40, 170],
+      life: [0.4, 0.72],
+      size: [cell * 0.24, cell * 0.4],
+      sizeEnd: cell * 0.85,
       gravity: -140,
       drag: 1.5,
       colors: [light, base, spark],
@@ -270,7 +313,9 @@ export const FX = {
 
   /** Rainbow colour-bomb ignition. */
   bombBurst(ps: ParticleSystem, x: number, y: number, cell: number) {
-    const rainbow = ['#ff3b6b', '#ff9f1c', '#ffe03d', '#4ade80', '#38bdf8', '#a78bfa', '#ffffff'];
+    // Saturated hues only. The bomb is the one effect that *should* read as
+    // every colour at once, which only works if each streak keeps its own.
+    const rainbow = ['#ff3b6b', '#ff9f1c', '#ffe03d', '#4ade80', '#38bdf8', '#a78bfa'];
     ps.emit({
       x,
       y,
@@ -302,21 +347,41 @@ export const FX = {
       additive: true,
       spin: [-16, 16],
     });
-    for (let i = 0; i < 4; i++) {
+    // Two staggered rings, not four. Concentric circles stop reading as a
+    // shockwave and start reading as a diagram somewhere around the third.
+    for (let i = 0; i < 2; i++) {
       ps.emit({
         x,
         y,
         count: 1,
         speed: [0, 0],
-        life: [0.5 + i * 0.07, 0.5 + i * 0.07],
+        life: [0.46 + i * 0.12, 0.46 + i * 0.12],
         size: [cell * 0.3, cell * 0.3],
-        sizeEnd: cell * (2.4 + i * 1.3),
-        colors: [rainbow[i % rainbow.length]],
+        sizeEnd: cell * (2.6 + i * 2.2),
+        // Warm white rather than pure — a hard white hoop is the most
+        // artificial thing that can be drawn over painted candy art.
+        colors: ['#fff0fa'],
         shape: 'ring',
         additive: true,
-        thickness: cell * 0.16,
+        thickness: cell * (0.1 - i * 0.03),
       });
     }
+
+    ps.emit({
+      x,
+      y,
+      count: 10,
+      spread: cell * 0.35,
+      speed: [90, 380],
+      life: [0.4, 0.8],
+      size: [cell * 0.09, cell * 0.16],
+      sizeEnd: 0,
+      drag: 1.0,
+      colors: rainbow,
+      shape: 'glint',
+      additive: true,
+      spin: [-3, 3],
+    });
   },
 
   /** Little trail that flies from a bomb toward each matching candy. */
@@ -342,7 +407,7 @@ export const FX = {
         size: [cell * 0.07, cell * 0.14],
         sizeEnd: 0,
         drag: 1.2,
-        colors: [light, spark, '#ffffff'],
+        colors: [light, spark],
         shape: 'spark',
         additive: true,
       });
@@ -383,7 +448,7 @@ export const FX = {
       sizeEnd: 0,
       gravity: 260,
       drag: 1.6,
-      colors: [light, spark, '#ffffff'],
+      colors: [light, spark],
       shape: 'spark',
       additive: true,
     });
@@ -391,7 +456,10 @@ export const FX = {
 
   /** Level-complete celebration. */
   confetti(ps: ParticleSystem, w: number, h: number, count = 120) {
-    const colors = ['#ff3b6b', '#ff9f1c', '#ffe03d', '#4ade80', '#38bdf8', '#a78bfa', '#ffffff'];
+    // Cream rather than pure white: confetti is paper, so its back face is
+    // drawn shaded, and shaded white is grey — which reads as ash, not
+    // celebration. A warm tint keeps the shadow side looking like paper.
+    const colors = ['#ff3b6b', '#ff9f1c', '#ffe03d', '#4ade80', '#38bdf8', '#a78bfa', '#fff1c9'];
     for (let i = 0; i < 3; i++) {
       ps.emit({
         x: w * (0.15 + i * 0.35),
@@ -425,8 +493,8 @@ export const FX = {
       size: [1.4, 3.4],
       sizeEnd: 0,
       drag: 0.3,
-      colors: ['#ffd2f5', '#c7b3ff', '#ffffff', '#9ee7ff'],
-      shape: 'spark',
+      colors: ['#ffd2f5', '#c7b3ff', '#fff3fb', '#9ee7ff'],
+      shape: 'glint',
       additive: true,
     });
   },

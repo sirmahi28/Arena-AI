@@ -86,11 +86,11 @@ a hint. If the board ever runs out of legal moves it reshuffles itself automatic
 "Juicy" isn't one effect, it's a pile of small ones firing together. Every candy
 that pops triggers:
 
-- **Shards** that tumble under gravity in the candy's own colours
+- **Shards** that tumble under gravity in the candy's own colours, each with a
+  lit facet across the top so it reads as a solid chip rather than a lozenge
 - **Additive sparks** for the bloom, on a separate render pass so the glow stacks
-- **Two shockwave rings** — a wide slow one and a tight fast one, because a
-  double pulse reads far punchier than a single ring for one extra particle
-- **Radiating speed lines** and **twinkling stars**
+- **One thin shockwave ring**, with a second pulse only on boosted pops
+- **Radiating speed lines** and **four-point glints**
 - **Sugar dust** drifting upward
 - **A physical shove to every neighbouring candy** — see below
 - **Squash-and-stretch** — candies inflate before they implode, and land with a bounce
@@ -115,6 +115,45 @@ never wobbles in lockstep.
 The result is that a match doesn't just delete candies — the whole
 neighbourhood recoils and springs back. Measured cost: **~2 ms/frame** under a
 software rasteriser.
+
+### Why more glow made it look worse
+
+The particle system went through a pass whose entire goal was to make the
+effects look *more expensive*, and almost all of it was subtraction. Four
+things were adding brightness and removing quality.
+
+**Every glow sprite had a white core.** Additive blending already drives
+overlaps toward white, so seeding white on top guaranteed that any burst
+collapsed into the same colourless flare — a red candy and a blue candy
+exploded identically. The core is now pushed only 55% toward white, and the
+falloff is tight rather than linear, so the bright part stays small and
+overlapping sparks add detail instead of flooding. Bursts read as their own
+colour again.
+
+**Pure white was seeded into nearly every emitter** — fourteen places. Two
+remain: the leading edge of the colour-bomb shockwave, and confetti, which is
+paper rather than light.
+
+**Every pop drew two shockwave rings.** Fine for one candy; a colour bomb
+clearing ten reds drew twenty expanding circles and the board turned into
+soap bubbles. A ring is punctuation. One per pop, thin, with the second pulse
+reserved for pops that earn it.
+
+**Rings were single hard strokes.** A stroked circle reads as geometry, not
+energy, and widening it at low alpha just adds a second hard edge. Canvas
+cannot gradient across a stroke, so rings are now four stacked strokes, each
+roughly half the width and well over double the opacity of the one beneath —
+close enough to a real falloff that no individual edge is findable.
+
+What was *added* is shape, not brightness: a four-point glint sprite to
+replace soft blobs in the sparkle role (a round blob two pixels across is
+indistinguishable from dirt on the screen; a spiked one reads as deliberate),
+per-shape decay envelopes so sparks snap out while smoke drifts, and a little
+high-frequency flicker, because steady sparkle reads as dots rather than
+lights.
+
+It got *faster*: median frame time 80.9 ms to 73.2 ms, and p95 106 ms to
+79.7 ms, since the ring budget was most of the worst-case overdraw.
 
 ### Light bloom
 
@@ -151,6 +190,12 @@ src/fx/
 
 The naïve version of this ran at ~15 fps under a software rasteriser. Two changes
 did most of the work:
+
+0. **Judge an effect at a fixed offset, not whenever the screenshot lands.**
+   `npm run shots` catches an arbitrary frame, which is useless for something
+   that lives 400 ms; `npm run fx` fires one named effect and captures the
+   board at 60/120/200/320/460 ms so two versions can be compared frame for
+   frame. Every particle change above was made against those captures.
 
 1. **Bake every gradient once.** `createRadialGradient` per particle per frame is
    the single most expensive thing you can do in Canvas 2D. Particle glows, comet
