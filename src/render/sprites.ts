@@ -539,6 +539,162 @@ function drawNova(ctx: CanvasRenderingContext2D, color: ColorId, r: number): voi
   ctx.restore();
 }
 
+/**
+ * Laser candy, forged by a run of six or more.
+ *
+ * It has to read as "stripe, but more" at 52 pixels, from across the board,
+ * in a fifth of a second — so it borrows the striped candy's vocabulary
+ * rather than inventing its own. Three bands instead of stripes-everywhere,
+ * a fat lit core with two thinner outriders, which is literally what the
+ * detonation does to the board. Glow wings behind the silhouette extend the
+ * axis past the candy so the direction is unmistakable even when the piece
+ * is surrounded.
+ */
+function drawLaser(
+  ctx: CanvasRenderingContext2D,
+  color: ColorId,
+  r: number,
+  horizontal: boolean,
+): void {
+  const [, light, dark, spark] = PALETTE[color % PALETTE.length];
+  const lum = cellLum[color] ?? 0.5;
+
+  // Wings, behind the body, along the firing axis.
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
+  const wing = horizontal
+    ? ctx.createLinearGradient(-r * 1.9, 0, r * 1.9, 0)
+    : ctx.createLinearGradient(0, -r * 1.9, 0, r * 1.9);
+  wing.addColorStop(0, withAlpha(light, 0));
+  wing.addColorStop(0.3, withAlpha(spark, 0.75));
+  wing.addColorStop(0.5, withAlpha('#ffffff', 0.9));
+  wing.addColorStop(0.7, withAlpha(spark, 0.75));
+  wing.addColorStop(1, withAlpha(light, 0));
+  ctx.fillStyle = wing;
+  if (horizontal) ctx.fillRect(-r * 1.9, -r * 0.3, r * 3.8, r * 0.6);
+  else ctx.fillRect(-r * 0.3, -r * 1.9, r * 0.6, r * 3.8);
+  ctx.restore();
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+
+  const peak = 0.66 - 0.44 * lum;
+  const shadow = 0.26 + 0.4 * lum;
+  // Centre lane fat, outriders thin — the same 1-2-1 weighting the blast has.
+  const lanes: Array<[number, number]> = [
+    [0, r * 0.3],
+    [-r * 0.58, r * 0.15],
+    [r * 0.58, r * 0.15],
+  ];
+  for (const [off, half] of lanes) {
+    // Dark seat first, so a pale candy still shows the lane.
+    ctx.fillStyle = withAlpha(shade(dark, 0.9), shadow * 0.8);
+    if (horizontal) ctx.fillRect(-r * 1.2, off - half * 1.35, r * 2.4, half * 2.7);
+    else ctx.fillRect(off - half * 1.35, -r * 1.2, half * 2.7, r * 2.4);
+
+    const g = horizontal
+      ? ctx.createLinearGradient(0, off - half, 0, off + half)
+      : ctx.createLinearGradient(off - half, 0, off + half, 0);
+    g.addColorStop(0, withAlpha(light, peak * 0.2));
+    g.addColorStop(0.5, withAlpha('#ffffff', peak));
+    g.addColorStop(1, withAlpha(light, peak * 0.2));
+    ctx.fillStyle = g;
+    if (horizontal) ctx.fillRect(-r * 1.2, off - half, r * 2.4, half * 2);
+    else ctx.fillRect(off - half, -r * 1.2, half * 2, r * 2.4);
+  }
+
+  // Hot bar down the middle of the centre lane.
+  const core = horizontal
+    ? ctx.createLinearGradient(-r, 0, r, 0)
+    : ctx.createLinearGradient(0, -r, 0, r);
+  core.addColorStop(0, withAlpha('#ffffff', 0));
+  core.addColorStop(0.5, withAlpha('#ffffff', 0.9));
+  core.addColorStop(1, withAlpha('#ffffff', 0));
+  ctx.fillStyle = core;
+  if (horizontal) ctx.fillRect(-r, -r * 0.075, r * 2, r * 0.15);
+  else ctx.fillRect(-r * 0.075, -r, r * 0.15, r * 2);
+  ctx.restore();
+}
+
+/**
+ * Vortex candy, forged by a 2x3 or larger slab.
+ *
+ * Every other special says "I will clear this shape around me". This one has
+ * to say "I will go and find my colour", which is a different idea and needs
+ * a different picture: an inward spiral with a hot eye, plus four chevrons
+ * pointing in at the rim. Inward-pointing marks are the one piece of
+ * iconography nothing else on the board uses, which is exactly why they were
+ * chosen — there is no chance of confusing it with a nova at a glance.
+ */
+function drawVortex(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
+  const [, light, dark, spark] = PALETTE[color % PALETTE.length];
+  const lum = cellLum[color] ?? 0.5;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+
+  // Two spiral arms. Drawn as short arc segments with a shrinking radius,
+  // which is cheaper and steadier at this size than a real parametric curve.
+  const arms = 2;
+  const turns = 1.45;
+  const steps = 26;
+  for (let a = 0; a < arms; a++) {
+    const phase = (a / arms) * Math.PI * 2;
+    for (const [col, width, alpha] of [
+      [shade(dark, 0.9), r * 0.3, (0.3 + 0.38 * lum) as number],
+      ['#ffffff', r * 0.17, (0.66 - 0.4 * lum) as number],
+    ] as Array<[string, number, number]>) {
+      ctx.beginPath();
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        const ang = phase + t * turns * Math.PI * 2;
+        const rad = r * (0.94 - 0.8 * t);
+        const x = Math.cos(ang) * rad;
+        const y = Math.sin(ang) * rad;
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.strokeStyle = withAlpha(col, alpha);
+      ctx.lineWidth = width;
+      ctx.lineCap = 'round';
+      ctx.stroke();
+    }
+  }
+
+  // The eye.
+  const eye = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.42);
+  eye.addColorStop(0, withAlpha('#ffffff', 0.95));
+  eye.addColorStop(0.5, withAlpha(spark, 0.55));
+  eye.addColorStop(1, withAlpha(spark, 0));
+  ctx.fillStyle = eye;
+  ctx.fillRect(-r * 0.42, -r * 0.42, r * 0.84, r * 0.84);
+  ctx.restore();
+
+  // Rim chevrons, behind the body so they break the silhouette inward.
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
+  for (let i = 0; i < 4; i++) {
+    const ang = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const cx = Math.cos(ang) * r * 1.2;
+    const cy = Math.sin(ang) * r * 1.2;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(ang);
+    const g = ctx.createLinearGradient(r * 0.3, 0, -r * 0.3, 0);
+    g.addColorStop(0, withAlpha(light, 0));
+    g.addColorStop(1, withAlpha(spark, 0.95));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.34, 0);
+    ctx.lineTo(r * 0.26, -r * 0.3);
+    ctx.lineTo(r * 0.26, r * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
 function drawWrapped(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
   const [, light, dark] = PALETTE[color % PALETTE.length];
 
@@ -738,6 +894,9 @@ export class SpriteCache {
       else if (special === 'wrapped') drawWrapped(ctx, color, r);
       else if (special === 'cross') drawCross(ctx, color, r);
       else if (special === 'nova') drawNova(ctx, color, r);
+      else if (special === 'laserH') drawLaser(ctx, color, r, true);
+      else if (special === 'laserV') drawLaser(ctx, color, r, false);
+      else if (special === 'vortex') drawVortex(ctx, color, r);
       // Last, so `destination-over` tucks it behind the finished piece.
       drawContactShadow(ctx, color, r);
     }

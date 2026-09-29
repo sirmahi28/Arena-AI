@@ -219,6 +219,46 @@ export class Sfx {
     this.tone(110, 0.9, { type: 'sine', gain: 0.18, slideTo: 55, delay: 0.5 });
   }
 
+  /** Laser: the stripe sound, widened — three sweeps instead of one. */
+  laser(): void {
+    for (let i = 0; i < 3; i++) {
+      this.tone(1900 - i * 240, 0.3, {
+        type: 'sawtooth',
+        gain: 0.075,
+        slideTo: 260 - i * 40,
+        delay: i * 0.018,
+      });
+    }
+    this.noise(0.42, { gain: 0.24, from: 9500, to: 420, q: 0.55 });
+    this.tone(150, 0.34, { type: 'sine', gain: 0.26, slideTo: 55 });
+  }
+
+  /** Vortex: a rising suck, then the thump when it closes. */
+  vortex(): void {
+    this.tone(180, 0.38, { type: 'triangle', gain: 0.16, slideTo: 1500 });
+    this.noise(0.4, { gain: 0.2, from: 300, to: 7000, q: 0.7 });
+    this.tone(120, 0.42, { type: 'sine', gain: 0.3, slideTo: 42, delay: 0.3 });
+    this.noise(0.28, { gain: 0.22, from: 5200, to: 120, q: 0.5 });
+  }
+
+  /**
+   * One colour-bomb bolt locking onto a target.
+   *
+   * Pitch climbs across the sequence, which is the cheapest way to tell the
+   * player that what they are hearing is *one* event with many parts rather
+   * than many identical events. It also builds tension toward the blast, so
+   * the detonation resolves something instead of just being loud.
+   *
+   * Kept deliberately tiny — this fires up to 25 times in a second, and
+   * anything with a tail turns the sequence into mush.
+   */
+  zapTick(step: number, total: number): void {
+    const k = total > 1 ? (step - 1) / (total - 1) : 1;
+    const f = 520 + k * 1180;
+    this.tone(f, 0.05, { type: 'square', gain: 0.045 });
+    this.tone(f * 2, 0.04, { type: 'sine', gain: 0.03, delay: 0.008 });
+  }
+
   ui(): void {
     this.tone(880, 0.06, { type: 'square', gain: 0.07 });
     this.tone(1320, 0.07, { type: 'sine', gain: 0.06, delay: 0.03 });

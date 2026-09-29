@@ -145,7 +145,8 @@ export class Game {
     const hooks: BoardHooks = {
       onPop: (t, cascade) => this.fxPop(t, cascade),
       onFire: (kind, col, row, color, span) => this.fxFire(kind, col, row, color, span),
-      onTracer: (fc, fr, tc, tr, color) => this.fxTracer(fc, fr, tc, tr, color),
+      onTracer: (fc, fr, tc, tr, color, step, total) =>
+        this.fxTracer(fc, fr, tc, tr, color, step, total),
       onLand: (t, force) => this.fxLand(t, force),
       onCascade: (step, cleared, points, cx, cy) => this.fxCascade(step, cleared, points, cx, cy),
       onForge: (special, col, row, color) => this.fxForge(special, col, row, color),
@@ -411,6 +412,28 @@ export class Game {
       this.shake.stop(0.035);
       sfx.cross();
       buzz([0, 22]);
+    } else if (kind === 'laserH' || kind === 'laserV') {
+      // Six in a row is the rarest thing a player will build on purpose, so
+      // it gets the biggest line effect in the game and a full stop of
+      // hit-stop to sell the weight.
+      FX.laserBeam(this.ps, px, py, kind === 'laserH', color, cell, span * cell * 0.6);
+      this.shake.add(0.5);
+      this.shake.flash(light, 0.22);
+      this.shake.stop(0.055);
+      sfx.laser();
+      buzz([0, 30, 18, 30]);
+      this.floaters.add('LASER!', px, py - cell * 0.55, {
+        size: cell * 0.42,
+        color: '#bff4ff',
+        life: 0.95,
+      });
+    } else if (kind === 'vortex') {
+      FX.vortexPull(this.ps, px, py, color, cell);
+      this.shake.add(0.34);
+      this.shake.flash(light, 0.16);
+      this.shake.stop(0.04);
+      sfx.vortex();
+      buzz([0, 18, 12, 26]);
     } else if (kind === 'nova') {
       FX.nova(this.ps, px, py, color, cell);
       this.shake.add(0.56);
@@ -440,10 +463,35 @@ export class Game {
     }
   }
 
-  private fxTracer(fc: number, fr: number, tc: number, tr: number, color: ColorId): void {
+  /**
+   * One colour-bomb bolt, plus the mark it leaves behind.
+   *
+   * The bolt alone was not enough once the sequence slowed down: a streak
+   * that arrives and vanishes leaves nothing to show the candy has been
+   * claimed, so a one-per-75ms sequence looked like unrelated flashes. The
+   * ring stamped at the target persists visually through the rest of the
+   * sequence, and by the last bolt the board is covered in them — which is
+   * exactly the "look how many of these I found" read the effect is for.
+   */
+  private fxTracer(
+    fc: number,
+    fr: number,
+    tc: number,
+    tr: number,
+    color: ColorId,
+    step: number,
+    total: number,
+  ): void {
     const [x0, y0] = this.cellToPx(fc, fr);
     const [x1, y1] = this.cellToPx(tc, tr);
-    FX.bombTracer(this.ps, x0, y0, x1, y1, color, this.L.cell);
+    const cell = this.L.cell;
+    FX.bombTracer(this.ps, x0, y0, x1, y1, color, cell);
+    FX.zapLock(this.ps, x1, y1, color, cell);
+    sfx.zapTick(step, total);
+    // A touch of shake per hit, scaled down so twenty of them do not add up
+    // to an earthquake before the actual explosion arrives.
+    this.shake.add(0.035);
+    if (step === total) buzz(14);
   }
 
   private fxLand(t: Tile, force: number): void {
@@ -1612,6 +1660,9 @@ export class Game {
     this.board.setSpecial(1, 2, 'cross');
     this.board.setSpecial(4, 7, 'nova');
     this.board.setSpecial(6, 2, 'bomb');
+    this.board.setSpecial(0, 8, 'laserH');
+    this.board.setSpecial(3, 6, 'laserV');
+    this.board.setSpecial(5, 0, 'vortex');
   }
 
   debugDetonate(kind: Special): boolean {

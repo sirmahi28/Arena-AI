@@ -195,21 +195,32 @@ export const FX = {
     const [base, light, , spark] = paletteOf(color);
     const dirs = horizontal ? [0, Math.PI] : [Math.PI / 2, -Math.PI / 2];
     for (const d of dirs) {
+      /*
+       * One wide spread of speeds rather than a narrow fast one.
+       *
+       * With `speed` spanning barely 2x and drag at 1.6, every streak
+       * reached its stopping distance at almost the same moment: a single
+       * hard blast front that was gone in a fifth of a second. Spanning 5x
+       * with light drag means there is always material in flight at every
+       * distance from the candy, which is what makes the beam read as
+       * pouring continuously out of the cell rather than being fired from
+       * it. The long tail of the life range does the same job in time.
+       */
       ps.emit({
         x,
         y,
-        count: 26,
-        spread: cell * 0.2,
-        speed: [length * 1.1, length * 2.6],
-        angle: [d - 0.07, d + 0.07],
-        life: [0.25, 0.5],
-        size: [cell * 0.09, cell * 0.24],
+        count: 30,
+        spread: cell * 0.16,
+        speed: [length * 0.55, length * 2.8],
+        angle: [d - 0.055, d + 0.055],
+        life: [0.3, 0.64],
+        size: [cell * 0.08, cell * 0.26],
         sizeEnd: 0,
-        drag: 1.6,
+        drag: 0.85,
         colors: [light, spark, base],
         shape: 'streak',
         additive: true,
-        stretch: 2.4,
+        stretch: 2.6,
       });
     }
     ps.emit({
@@ -317,43 +328,111 @@ export const FX = {
    * reading as two unrelated effects that happened to fire on the same
    * frame.
    */
+  /**
+   * The tee-forged cross going off.
+   *
+   * The first version fired everything outward on the same frame at high
+   * speed with heavy drag, which looks like a firework and reads as
+   * *happening to* the candy rather than coming *out of* it. Three changes
+   * fix that, and all three are about legible direction:
+   *
+   * 1. An implosion. Particles spawned out at radius with negative speed
+   *    collapse inward, so the eye is pulled to the source cell a beat
+   *    before anything leaves it.
+   * 2. A graded sweep. Streaks leave at a spread of speeds with light drag
+   *    and long life, so instead of one blast front there is a continuous
+   *    ribbon of material still travelling outward from the candy for the
+   *    whole effect.
+   * 3. Two rings rather than one, the second lagging and thinner, which
+   *    gives the shockwave a leading and a trailing edge instead of a single
+   *    hoop that appears and disappears.
+   */
   crossCore(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number) {
     const [base, light, , spark] = paletteOf(color);
+
+    // 1. Implosion: spawned on a wide ring, flying in.
+    ps.emit({
+      x,
+      y,
+      count: 18,
+      spread: cell * 2.1,
+      speed: [-420, -190],
+      life: [0.16, 0.3],
+      size: [cell * 0.05, cell * 0.12],
+      sizeEnd: 0,
+      drag: 0.3,
+      colors: [spark, light],
+      shape: 'spark',
+      additive: true,
+    });
+
+    // 2. Core flash, held briefly so the beams have something to leave from.
     ps.emit({
       x,
       y,
       count: 1,
       speed: [0, 0],
-      life: [0.3, 0.3],
-      size: [cell * 0.2, cell * 0.2],
-      sizeEnd: cell * 1.5,
+      life: [0.26, 0.26],
+      size: [cell * 0.85, cell * 0.85],
+      sizeEnd: cell * 0.1,
+      colors: ['#ffffff'],
+      shape: 'glint',
+      additive: true,
+    });
+
+    // 3. Leading and trailing shockwave rings.
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.34, 0.34],
+      size: [cell * 0.18, cell * 0.18],
+      sizeEnd: cell * 1.7,
       colors: [spark],
       shape: 'ring',
       additive: true,
-      thickness: cell * 0.09,
+      thickness: cell * 0.1,
     });
     ps.emit({
       x,
       y,
-      count: 8,
-      spread: cell * 0.2,
-      speed: [60, 260],
-      life: [0.3, 0.6],
-      size: [cell * 0.08, cell * 0.15],
+      count: 1,
+      speed: [0, 0],
+      life: [0.5, 0.5],
+      size: [cell * 0.1, cell * 0.1],
+      sizeEnd: cell * 2.4,
+      colors: [light],
+      shape: 'ring',
+      additive: true,
+      thickness: cell * 0.045,
+    });
+
+    // 4. Slow glinting motes that hang in the air after the beams have gone.
+    ps.emit({
+      x,
+      y,
+      count: 12,
+      spread: cell * 0.22,
+      speed: [40, 210],
+      life: [0.45, 0.85],
+      size: [cell * 0.07, cell * 0.15],
       sizeEnd: 0,
-      drag: 1.1,
-      colors: [spark, light],
+      drag: 0.9,
+      colors: [spark, light, '#ffffff'],
       shape: 'glint',
       additive: true,
       spin: [-3, 3],
     });
+
+    // 5. Solid debris, thrown with gravity so the cell feels like it broke.
     ps.emit({
       x,
       y,
-      count: 10,
+      count: 12,
       spread: cell * 0.25,
-      speed: [140, 420],
-      life: [0.3, 0.6],
+      speed: [150, 430],
+      life: [0.35, 0.7],
       size: [cell * 0.05, cell * 0.13],
       sizeEnd: 0,
       gravity: 700,
@@ -364,6 +443,180 @@ export const FX = {
       spin: [-16, 16],
     });
   },
+
+  /**
+   * The laser firing: three lanes of light leaving the candy at once.
+   *
+   * Built from the same streak vocabulary as `stripeBeam` so the two are
+   * obviously related, but emitted from three parallel origins offset across
+   * the axis. That is what sells "three rows" rather than "one very bright
+   * row" — a single thick beam at this scale just looks like a stripe with
+   * the brightness turned up.
+   */
+  laserBeam(
+    ps: ParticleSystem,
+    x: number,
+    y: number,
+    horizontal: boolean,
+    color: ColorId,
+    cell: number,
+    length: number,
+  ) {
+    const [base, light, , spark] = paletteOf(color);
+    const dirs = horizontal ? [0, Math.PI] : [Math.PI / 2, -Math.PI / 2];
+    for (const lane of [-1, 0, 1]) {
+      const ox = horizontal ? 0 : lane * cell;
+      const oy = horizontal ? lane * cell : 0;
+      const heat = lane === 0 ? 1 : 0.6;
+      for (const d of dirs) {
+        ps.emit({
+          x: x + ox,
+          y: y + oy,
+          count: Math.round(22 * heat),
+          spread: cell * 0.14,
+          speed: [length * 0.6, length * 2.9],
+          angle: [d - 0.04, d + 0.04],
+          life: [0.3, 0.68],
+          size: [cell * 0.07, cell * 0.24 * heat],
+          sizeEnd: 0,
+          drag: 0.8,
+          colors: lane === 0 ? ['#ffffff', spark, light] : [light, spark, base],
+          shape: 'streak',
+          additive: true,
+          stretch: 2.8,
+        });
+      }
+    }
+    // One wide ring to bind the three lanes into a single event.
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.42, 0.42],
+      size: [cell * 0.3, cell * 0.3],
+      sizeEnd: cell * 3,
+      colors: [spark],
+      shape: 'ring',
+      additive: true,
+      thickness: cell * 0.075,
+    });
+    ps.emit({
+      x,
+      y,
+      count: 14,
+      spread: cell * 0.3,
+      speed: [120, 380],
+      life: [0.35, 0.7],
+      size: [cell * 0.05, cell * 0.13],
+      sizeEnd: 0,
+      gravity: 660,
+      drag: 0.5,
+      colors: [base, light, spark],
+      shape: 'shard',
+      additive: false,
+      spin: [-14, 14],
+    });
+  },
+
+  /**
+   * The vortex spinning up, before it starts reeling candies in.
+   *
+   * Everything here moves *inward* — negative speeds from a wide spawn ring,
+   * plus contracting rings. The whole point of the special is that it pulls,
+   * and if the birth effect throws material outward like every other
+   * detonation does, the player has to be told what it does instead of
+   * seeing it.
+   */
+  vortexPull(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number) {
+    const [, light, , spark] = paletteOf(color);
+    ps.emit({
+      x,
+      y,
+      count: 26,
+      spread: cell * 2.6,
+      speed: [-460, -200],
+      life: [0.24, 0.48],
+      size: [cell * 0.05, cell * 0.13],
+      sizeEnd: 0,
+      drag: 0.25,
+      colors: [spark, light, '#ffffff'],
+      shape: 'streak',
+      additive: true,
+      stretch: 2.2,
+    });
+    // Contracting rings: size shrinking rather than growing.
+    for (const [life, from] of [
+      [0.36, 2.6],
+      [0.5, 3.4],
+    ] as Array<[number, number]>) {
+      ps.emit({
+        x,
+        y,
+        count: 1,
+        speed: [0, 0],
+        life: [life, life],
+        size: [cell * from, cell * from],
+        sizeEnd: cell * 0.2,
+        colors: [spark],
+        shape: 'ring',
+        additive: true,
+        thickness: cell * 0.06,
+      });
+    }
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.34, 0.34],
+      size: [cell * 0.2, cell * 0.2],
+      sizeEnd: cell * 1.1,
+      colors: ['#ffffff'],
+      shape: 'glint',
+      additive: true,
+    });
+  },
+
+  /**
+   * The mark a colour-bomb bolt leaves on a candy it has claimed.
+   *
+   * Long-lived on purpose: the targeting sequence now runs up to a second,
+   * and a mark that fades in 300ms would leave the early targets looking
+   * untouched by the time the last one is hit. These have to still be on
+   * screen when the whole set detonates together.
+   */
+  zapLock(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number) {
+    const [, light, , spark] = paletteOf(color);
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.7, 0.7],
+      size: [cell * 0.9, cell * 0.9],
+      sizeEnd: cell * 0.62,
+      colors: [spark],
+      shape: 'ring',
+      additive: true,
+      thickness: cell * 0.055,
+    });
+    ps.emit({
+      x,
+      y,
+      count: 4,
+      spread: cell * 0.3,
+      speed: [20, 90],
+      life: [0.24, 0.44],
+      size: [cell * 0.05, cell * 0.1],
+      sizeEnd: 0,
+      drag: 1.4,
+      colors: [light, '#ffffff'],
+      shape: 'spark',
+      additive: true,
+    });
+  },
+
 
   /**
    * Nova: the plus-shape detonation. Reads as an upgrade of the wrapped

@@ -34,8 +34,8 @@ const stats = {
   cascades: 0,
   maxCascade: 0,
   forgeLog: [],
-  forged: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, bomb: 0 },
-  fires: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, bomb: 0 },
+  forged: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, laserH: 0, laserV: 0, vortex: 0, bomb: 0 },
+  fires: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, laserH: 0, laserV: 0, vortex: 0, bomb: 0 },
   shuffles: 0,
   points: 0,
 };
@@ -258,7 +258,36 @@ function runTo(b, label) {
   console.log('✓ plus-shaped match forges a nova candy');
 }
 
-// 2x2 block (two parallel runs one line apart) -> wrapped candy.
+/*
+ * 2x2 block -> wrapped candy.
+ *
+ * The two runs are *offset* by one column on purpose. Stacking them flush
+ * (cols 1-3 over cols 1-3) paints a 2x3 slab, not a 2x2 — that fixture was
+ * quietly testing the wrong shape for as long as 2x3 and 2x2 forged the same
+ * thing, and started failing the moment they stopped. Offsetting gives an
+ * overlap of exactly two columns, which is the smallest group that contains
+ * a 2x2 and no larger slab.
+ */
+{
+  const b = cleanBoard({
+    '1,4': 0, '2,4': 0, '3,4': 0,
+    '2,5': 0, '3,5': 0, '4,5': 0,
+    // (4,4) is already colour 0 under cleanBoard's (c + 2r) % 6 paint, which
+    // would silently stretch row 4's run to cols 1-4 and hand the overlap a
+    // third column — i.e. put the 2x3 slab straight back. Override it.
+    '4,4': 1, '0,5': 1,
+  });
+  const mark = stats.forgeLog.length;
+  if (!b.crushAt(6, 8)) fail('square fixture: crush refused');
+  runTo(b, 'square fixture');
+  if (stats.forgeLog[mark] !== 'vortex') {
+    fail(`a 2x2 block should forge a vortex candy (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ 2x2 square block forges a vortex candy');
+}
+
+// 2x3 slab -> vortex candy. Strictly harder to build than a 2x2, so it must
+// not round down to the same wrapped candy.
 {
   const b = cleanBoard({
     '1,4': 0, '2,4': 0, '3,4': 0,
@@ -266,12 +295,42 @@ function runTo(b, label) {
     '4,4': 1,
   });
   const mark = stats.forgeLog.length;
-  if (!b.crushAt(6, 8)) fail('square fixture: crush refused');
-  runTo(b, 'square fixture');
-  if (stats.forgeLog[mark] !== 'wrapped') {
-    fail(`a 2x2 block should forge a wrapped candy (got ${stats.forgeLog[mark]})`);
+  if (!b.crushAt(6, 8)) fail('vortex fixture: crush refused');
+  runTo(b, 'vortex fixture');
+  if (stats.forgeLog[mark] !== 'nova') {
+    fail(`a 2x3 slab should forge a nova candy (got ${stats.forgeLog[mark]})`);
   }
-  console.log('✓ 2x2 square block forges a wrapped candy');
+  console.log('✓ 2x3 slab forges a nova candy, not the 2x2 hiding inside it');
+}
+
+// 6-in-a-row -> horizontal laser, not a colour bomb.
+{
+  const b = cleanBoard({
+    '0,4': 0, '1,4': 0, '2,4': 0, '3,4': 0, '4,4': 0, '5,4': 0,
+    '6,4': 1,
+  });
+  const mark = stats.forgeLog.length;
+  if (!b.crushAt(6, 8)) fail('laser fixture: crush refused');
+  runTo(b, 'laser fixture');
+  if (stats.forgeLog[mark] !== 'laserH') {
+    fail(`a run of six should forge a laser (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ 6-in-a-row forges a horizontal laser');
+}
+
+// A laser takes three whole lanes when it goes off.
+{
+  const b = cleanBoard({});
+  b.tiles[idx(3, 4, COLS)].special = 'laserH';
+  // Delta, not the global tally: `stats.cleared` has every earlier fixture in
+  // it, and `runTo` keeps cascading after the laser itself has gone off.
+  const mark = stats.cleared;
+  if (!b.activateAt(3, 4)) fail('laser detonate: activate refused');
+  runTo(b, 'laser detonate');
+  const took = stats.cleared - mark;
+  // Rows 3, 4 and 5 across all 7 columns.
+  if (took < 21) fail(`a laser should clear at least three full rows (cleared ${took})`);
+  console.log(`✓ laser clears three lanes (${took} candies)`);
 }
 
 // A striped candy caught in a match clears its whole row.
@@ -335,8 +394,8 @@ console.log(`
  moves simulated   ${stats.moves}
  candies cleared   ${stats.cleared}
  cascade steps     ${stats.cascades}  (deepest chain: ${stats.maxCascade + 1}x)
- specials forged   striped ${stats.forged.stripeH + stats.forged.stripeV} · wrapped ${stats.forged.wrapped} · cross ${stats.forged.cross} · nova ${stats.forged.nova} · bombs ${stats.forged.bomb}
- specials fired    striped ${stats.fires.stripeH + stats.fires.stripeV} · wrapped ${stats.fires.wrapped} · cross ${stats.fires.cross} · nova ${stats.fires.nova} · bombs ${stats.fires.bomb}
+ specials forged   striped ${stats.forged.stripeH + stats.forged.stripeV} · wrapped ${stats.forged.wrapped} · cross ${stats.forged.cross} · nova ${stats.forged.nova} · laser ${stats.forged.laserH + stats.forged.laserV} · vortex ${stats.forged.vortex} · bombs ${stats.forged.bomb}
+ specials fired    striped ${stats.fires.stripeH + stats.fires.stripeV} · wrapped ${stats.fires.wrapped} · cross ${stats.fires.cross} · nova ${stats.fires.nova} · laser ${stats.fires.laserH + stats.fires.laserV} · vortex ${stats.fires.vortex} · bombs ${stats.fires.bomb}
  auto-shuffles     ${stats.shuffles}
  total points      ${stats.points.toLocaleString()}
  avg frames/move   ${avgFrames}  (~${(avgFrames / 60).toFixed(2)}s of animation)

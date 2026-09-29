@@ -14,6 +14,21 @@ export const COLOR_COUNT = 6;
  * same wrapped candy, which threw away the information the player had just
  * created. A tee is a harder shape to build than a corner and a plus is
  * harder still, so each now forges something visibly different.
+ *
+ * `laserH`/`laserV` and `vortex` extend the same principle past five. A run
+ * of six and a 2x3 slab were both being quietly rounded down — six became a
+ * colour bomb exactly like five did, and a 2x3 became a wrapped exactly like
+ * a 2x2 did — so the two hardest shapes on the board paid nothing for the
+ * extra difficulty. Now the ladder keeps going:
+ *
+ *   laserH/laserV  three whole lanes, forged by a run of six or more.
+ *   vortex         hunts down the nearest candies of its own colour
+ *                  wherever they are, forged by a 2x3 or larger slab.
+ *
+ * `vortex` is deliberately not just "a bigger nova". Every other special
+ * clears a fixed shape around itself; this one reaches across the board and
+ * picks its targets, which makes it the only special whose result depends on
+ * what the rest of the board looks like.
  */
 export type Special =
   | 'none'
@@ -22,6 +37,9 @@ export type Special =
   | 'wrapped'
   | 'cross'
   | 'nova'
+  | 'laserH'
+  | 'laserV'
+  | 'vortex'
   | 'bomb';
 
 export type TileState = 'idle' | 'falling' | 'swapping' | 'clearing';

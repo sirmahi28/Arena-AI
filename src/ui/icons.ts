@@ -66,6 +66,16 @@ function mix(a: string, b: string, t: number): string {
  * those, and calls this several times with different ones.
  */
 function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
+  // Every filled path is also stroked with a round-joined pen. That single
+  // change is what separates "vector glyph" from "moulded object": corners
+  // gain a real radius, thin necks thicken, and the silhouette stops having
+  // the mathematically sharp points that read as flat no matter how well the
+  // face is lit. Icons that want a chunkier or finer pen override lineWidth.
+  const solid = () => {
+    ctx.fill();
+    ctx.stroke();
+  };
+  ctx.lineWidth = Math.max(1.5, s * 0.1);
   switch (id) {
     case 'sound-on':
     case 'sound-off': {
@@ -78,7 +88,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
       ctx.lineTo(-k * 0.35, k * 0.35);
       ctx.lineTo(-k * 0.85, k * 0.35);
       ctx.closePath();
-      ctx.fill();
+      solid();
 
       if (id === 'sound-on') {
         for (let i = 1; i <= 2; i++) {
@@ -110,7 +120,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
       ctx.lineTo(hx - s * 0.05, hy - s * 0.26);
       ctx.lineTo(hx + s * 0.22, hy - s * 0.12);
       ctx.closePath();
-      ctx.fill();
+      solid();
       break;
     }
 
@@ -128,7 +138,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
         ctx.lineTo(k * 0.5, -flip * k * 0.55 - k * 0.32);
         ctx.lineTo(k * 0.5, -flip * k * 0.55 + k * 0.32);
         ctx.closePath();
-        ctx.fill();
+        solid();
       };
       arrow(1);
       arrow(-1);
@@ -156,7 +166,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
       ctx.lineTo(hw * 0.8, -k * 0.95 + hh * 1.6);
       ctx.lineTo(-hw * 0.8, -k * 0.95 + hh * 1.6);
       ctx.closePath();
-      ctx.fill();
+      solid();
       ctx.restore();
       break;
     }
@@ -165,15 +175,15 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
       const k = s * 0.4;
       ctx.beginPath();
       ctx.arc(0, -k * 0.25, k * 0.6, 0, TAU);
-      ctx.fill();
+      solid();
       ctx.beginPath();
       ctx.roundRect?.(-k * 0.3, k * 0.28, k * 0.6, k * 0.2, k * 0.08);
       if (!ctx.roundRect) ctx.rect(-k * 0.3, k * 0.28, k * 0.6, k * 0.2);
-      ctx.fill();
+      solid();
       ctx.beginPath();
       ctx.roundRect?.(-k * 0.22, k * 0.56, k * 0.44, k * 0.18, k * 0.07);
       if (!ctx.roundRect) ctx.rect(-k * 0.22, k * 0.56, k * 0.44, k * 0.18);
-      ctx.fill();
+      solid();
       ctx.lineWidth = Math.max(1.4, s * 0.085);
       for (let i = 0; i < 5; i++) {
         const a = -Math.PI + (i / 4) * Math.PI;
@@ -192,7 +202,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
       ctx.lineTo(k * 0.92, 0);
       ctx.lineTo(-k * 0.6, k);
       ctx.closePath();
-      ctx.fill();
+      solid();
       break;
     }
 
@@ -204,7 +214,7 @@ function trace(ctx: CanvasRenderingContext2D, id: IconId, s: number): void {
         ctx.lineTo(dx + k * 0.5, 0);
         ctx.lineTo(dx - k * 0.32, k * 0.78);
         ctx.closePath();
-        ctx.fill();
+        solid();
       }
       break;
     }
@@ -258,7 +268,22 @@ export function drawIcon(
   ctx.drawImage(cv, -w / 2, -w / 2, w, w);
 }
 
-/** The actual 3D render. Runs once per cache entry, never per frame. */
+/**
+ * The actual 3D render. Runs once per cache entry, never per frame.
+ *
+ * The earlier version stamped the glyph three times — shadow, one offset
+ * extrusion, face — which gives a *bevel*, not a form. At icon size a single
+ * offset copy reads as a hard step: you can see the exact pixel where the
+ * side wall stops and the face begins, and the result looks like letterpress
+ * rather than like an object.
+ *
+ * Smoothness comes from sweeping the extrusion instead of stepping it. The
+ * wall is drawn as a stack of copies from `depth` up to 0, each one a shade
+ * lighter, so the side turns continuously into the face with no visible
+ * seam. On top of that goes a soft upper-left gloss and a bottom ambient
+ * occlusion, both composited `source-atop` so they can only ever land on the
+ * icon itself. None of this could run per frame; all of it is free once baked.
+ */
 function paint(
   ctx: CanvasRenderingContext2D,
   id: IconId,
@@ -266,44 +291,52 @@ function paint(
   color?: string,
 ): void {
   const [hi, lo] = color ? [color, mix(color, '#20143a', 0.55)] : TINT[id];
-  const depth = Math.max(1, s * 0.07);
+  const depth = Math.max(1.5, s * 0.085);
+  const lw = Math.max(1.5, s * 0.12);
 
   ctx.save();
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
-  const lw = Math.max(1.5, s * 0.12);
 
-  // 1. Contact shadow. Soft and low so the icon sits *on* the button face.
-  //    Only affordable at all because this is baked once, not per frame.
+  // 1. Contact shadow. Soft, low and slightly wide, so the icon sits *on*
+  //    the surface instead of floating over it.
   ctx.save();
-  ctx.translate(0, depth * 1.8);
-  ctx.globalAlpha = 0.26;
-  ctx.filter = 'blur(2px)';
-  ctx.fillStyle = '#130820';
-  ctx.strokeStyle = '#130820';
+  ctx.translate(0, depth * 2.1);
+  ctx.globalAlpha = 0.3;
+  ctx.filter = 'blur(2.5px)';
+  ctx.fillStyle = '#120720';
+  ctx.strokeStyle = '#120720';
   ctx.lineWidth = lw;
   trace(ctx, id, s);
   ctx.restore();
 
-  // 2. Extrusion: the side wall. It has to be a much darker version of the
-  //    icon's *own* colour. The first attempt mixed it toward purple, which
-  //    at icon size read as a blue ghost copy offset a pixel down — like a
-  //    misregistered print rather than thickness.
+  // 2. Swept side wall. Bottom of the sweep is nearly black, the top meets
+  //    the darkest stop of the face gradient, so wall and face join without
+  //    a seam. Step count follows depth: enough copies that consecutive
+  //    offsets are under a pixel apart.
+  const deep = mix(lo, '#000000', 0.62);
+  const steps = Math.max(4, Math.ceil(depth * 2.2));
   ctx.save();
-  ctx.translate(0, depth);
-  const wall = mix(lo, '#000000', 0.55);
-  ctx.fillStyle = wall;
-  ctx.strokeStyle = wall;
   ctx.lineWidth = lw;
-  trace(ctx, id, s);
+  for (let i = steps; i >= 1; i--) {
+    const k = i / steps;
+    const c = mix(lo, deep, k);
+    ctx.save();
+    ctx.translate(0, depth * k);
+    ctx.fillStyle = c;
+    ctx.strokeStyle = c;
+    trace(ctx, id, s);
+    ctx.restore();
+  }
   ctx.restore();
 
-  // 3. Lit face. The white stop is a narrow specular band at the very top
-  //    rather than a third of the glyph, so the tint underneath survives.
-  const g = ctx.createLinearGradient(0, -s * 0.5, 0, s * 0.5);
+  // 3. Lit face. The white stop stays a narrow specular band at the very
+  //    top; letting it reach a third of the way down washes the tint out
+  //    completely and the icon goes back to looking white.
+  const g = ctx.createLinearGradient(0, -s * 0.52, 0, s * 0.52);
   g.addColorStop(0, '#ffffff');
-  g.addColorStop(0.14, hi);
-  g.addColorStop(0.62, mix(hi, lo, 0.55));
+  g.addColorStop(0.16, hi);
+  g.addColorStop(0.58, mix(hi, lo, 0.5));
   g.addColorStop(1, lo);
   ctx.save();
   ctx.fillStyle = g;
@@ -312,17 +345,47 @@ function paint(
   trace(ctx, id, s);
   ctx.restore();
 
-  // 4. Catchlight along the top edge only. Clipping to the upper third and
-  //    over-drawing in white gives a bevel without a second set of paths.
+  // 4. Gloss and occlusion, both clipped to what is already painted.
+  //    `source-atop` is doing the clipping, which means no second set of
+  //    paths and no clip region to get wrong.
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+
+  // Upper-left sheen: the highlight every other surface in the game has.
+  const gloss = ctx.createRadialGradient(
+    -s * 0.22,
+    -s * 0.34,
+    s * 0.02,
+    -s * 0.22,
+    -s * 0.34,
+    s * 0.78,
+  );
+  gloss.addColorStop(0, 'rgba(255,255,255,0.62)');
+  gloss.addColorStop(0.45, 'rgba(255,255,255,0.16)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gloss;
+  ctx.fillRect(-s, -s, s * 2, s * 2);
+
+  // Ambient occlusion along the bottom, so the form turns away from the
+  // light rather than ending flat.
+  const ao = ctx.createLinearGradient(0, s * 0.08, 0, s * 0.6);
+  ao.addColorStop(0, 'rgba(24,10,44,0)');
+  ao.addColorStop(1, 'rgba(24,10,44,0.34)');
+  ctx.fillStyle = ao;
+  ctx.fillRect(-s, -s * 0.1, s * 2, s * 1.2);
+  ctx.restore();
+
+  // 5. Rim light along the very top edge. Thin, additive, and clipped to the
+  //    upper band — it reads as the light catching a rounded edge.
   ctx.save();
   ctx.beginPath();
-  ctx.rect(-s, -s, s * 2, s * 0.5);
+  ctx.rect(-s, -s, s * 2, s * 0.46);
   ctx.clip();
-  ctx.globalAlpha = 0.42;
+  ctx.globalAlpha = 0.5;
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = '#ffffff';
   ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = lw * 0.42;
+  ctx.lineWidth = lw * 0.34;
   trace(ctx, id, s);
   ctx.restore();
 

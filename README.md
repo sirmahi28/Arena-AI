@@ -90,15 +90,37 @@ three five-cell shapes is one comparison: where the two runs cross.
 |---|---|---|
 | 3 in a line | — | the three |
 | 4 in a line | striped | that whole row or column |
-| 2x2 block inside a group | wrapped | 3x3 |
+| 2x2 block inside a group | **vortex** | itself + the 9 nearest candies of its colour, anywhere |
 | L — runs cross at the **end of both** | wrapped | 3x3 |
 | T — cross at the **middle of one** | **cross** | full row **and** column |
 | plus — cross at the **middle of both** | **nova** | 5x5, corners cut |
+| 2x3 slab or larger | **nova** | 5x5, corners cut |
 | 5 in a line | colour bomb | every candy of one colour |
+| 6 or more in a line | **laser** | three whole lanes |
 
 L, T and plus all used to forge the same wrapped candy, which threw away the
 information the player had just built. A tee is harder to engineer than a
 corner and a plus is harder still, so each forges something different now.
+
+The ladder keeps going past five for the same reason. A run of six and a 2x3
+slab were both being quietly rounded down — six paid out exactly what five
+did, and a 2x3 paid out exactly what the 2x2 hiding inside it did — so the two
+hardest shapes on the board cost more to build and returned nothing extra.
+
+`square` moving from wrapped to **vortex** also fixes a duplicate that had
+been there from the start: a corner and a 2x2 are quite different things to
+build and both forged the same wrapped candy, so one of the two shapes was
+effectively invisible. It is what makes the vortex reachable, too — gated
+behind a 2x3 it forged about once every 1,500 moves in the soak, which is to
+say most players would never once have seen it.
+
+The **vortex** is deliberately not just a bigger nova. Every other special
+clears a fixed shape around itself; this one reaches across the board and
+picks its targets by colour, nearest first, which makes it the only special
+whose result depends on what the rest of the board looks like. It is capped at
+nine catches — uncapped it is a colour bomb with a different sprite, and on a
+colour-heavy board it would routinely take twenty-plus and make the actual
+colour bomb pointless.
 
 Two of these can only arrive by cascade, which is worth knowing before trying
 to test them. A plus needs its centre filled last, and every cell orthogonally
@@ -109,9 +131,10 @@ construction; the fixtures for them paint the shape and then crush an
 unrelated cell in a far corner, which ends in the same full-board sweep every
 cascade uses.
 
-The two new specials fold into the existing combo table rather than doubling
-it: a cross is a line special that points both ways, a nova is an area
-special that reaches further. Every pairing that already worked keeps working
+Every special folds into the existing combo table rather than doubling it: a
+cross is a line special that points both ways, a laser is a line special three
+lanes thick, a nova is an area special that reaches further and a vortex is an
+area special that chooses its own area. Every pairing that already worked keeps working
 and only the radius changes. Sixteen new branches would have been sixteen new
 ways to be subtly wrong.
 
@@ -135,12 +158,35 @@ anything.
 
 A colour bomb used to delete its targets on the frame it fired, which is the
 least satisfying way to spend the best piece in the game: a third of the board
-simply vanished. Now the bolts go out first, one per target on a 16 ms
-stagger, each target lighting up as its bolt lands, and the whole set
-detonates together once the last one arrives. The stagger tightens
-automatically so the sequence always fits inside ~340 ms — any longer and it
-stops reading as one event and starts feeling like the game has taken the
-turn away from you.
+simply vanished. Now the bolts go out first — **one per target, one at a
+time** — each target lighting up as its bolt lands, and the whole set
+detonates together once the last one arrives.
+
+The first attempt at this used a 16 ms stagger capped at 340 ms total, which
+is not a sequence: it is a single flash with a slight smear. Every target lit
+at once, the board went white, and the one thing a colour bomb should
+communicate — *look how many of these I just found* — was over before the eye
+could follow it. The numbers that actually work are **75 ms** per bolt, capped
+at **1.15 s** total, with a **190 ms** beat of silence before the blast. Slow
+enough to count individually, fast enough to feel like a machine gun rather
+than a queue, and the pause is what makes the simultaneous detonation land as
+a payoff instead of as the tail of the same animation.
+
+Three details carry it:
+
+- **Nearest first.** The queue comes out of a left-to-right scan of the tile
+  array, so unsorted it hops around the board at random and reads as noise.
+  Sorting by distance turns the same bolts into a wavefront.
+- **The marks accumulate.** `updateVisuals` decays glow at 2.4/s, so over a
+  sequence this long the first candies hit had gone dark again by the time the
+  last was marked. Glow is now re-asserted every frame for everything already
+  claimed, so the player watches the doomed set *grow*.
+- **Rising pitch.** Each bolt ticks a semitone higher than the last, which is
+  the cheapest way to say "this is one event with many parts".
+
+The **vortex** reuses the whole mechanism with one flag flipped: a colour bomb
+reaches out, a vortex pulls in, so the bolt is drawn target → source instead.
+Same queue, same stagger, same lock-on marks.
 
 Nothing about *what* clears changed. It is a new board phase in front of the
 existing one, so no cascade or scoring path had to learn a new shape.

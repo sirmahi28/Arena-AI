@@ -133,6 +133,28 @@ export function drawStar(
  * Pressing sinks the face into the lip rather than moving the whole button,
  * so the travel is visible against a fixed silhouette.
  */
+/**
+ * A button, drawn as a piece of soft glass rather than as a moulded plastic
+ * key.
+ *
+ * The previous treatment was the classic mobile-game button: an opaque face
+ * on a coloured lip, a hard keyline around the outside and a bright
+ * elliptical sheen across the top. It is a well-understood look and it was
+ * fighting everything else on screen — the candies already carry the gloss,
+ * the backdrop already carries the depth, and seven opaque lozenges stamped
+ * over the top of both flattened the whole composition into UI-on-a-game.
+ *
+ * What replaces it has no lip, no keyline and no sheen arc. The body is a
+ * translucent well that lets the backdrop through, lit from the upper left
+ * and darkening as it turns away; the only hard element is a hairline along
+ * the top-left edge where a glass rim would actually catch the light. The
+ * icon then sits on that as the one solid, fully-lit object, which is the
+ * thing the player is meant to be looking at.
+ *
+ * Everything here is gradient fills. No filters, no shadowBlur — this runs
+ * for every button every frame, and the software rasteriser this ships on
+ * charges roughly 50x for a blur.
+ */
 export function drawButton(
   ctx: CanvasRenderingContext2D,
   b: HudButton,
@@ -141,62 +163,70 @@ export function drawButton(
   iconSize = 0,
 ): void {
   const press = b.pressed;
-  const depth = b.h * 0.13;
-  const lift = depth * (1 - press);
-  const y = b.y + depth - lift;
-  const rad = b.round ? b.h / 2 : b.h * 0.3;
+  // Pressing pushes the glass *into* the surface rather than squashing a
+  // lip: it sinks a little and the rim light rolls off.
+  const sink = b.h * 0.035 * press;
+  const y = b.y + sink;
+  const rad = b.round ? b.h / 2 : b.h * 0.34;
+  const cxm = b.x + b.w / 2;
+  const cym = y + b.h / 2;
 
   ctx.save();
 
-  // Outer keyline + lip, drawn as one taller shape behind the face.
-  roundRectPath(ctx, b.x, b.y, b.w, b.h + depth, rad);
-  ctx.fillStyle = 'rgba(18,7,34,0.55)';
-  ctx.fill();
-  roundRectPath(ctx, b.x + 1, b.y + 1, b.w - 2, b.h + depth - 2, rad);
-  ctx.fillStyle = colors[2];
-  ctx.fill();
+  // Soft halo. A wide, very faint radial bloom that seats the button into
+  // the backdrop without drawing an edge anywhere.
+  const halo = ctx.createRadialGradient(cxm, cym, b.h * 0.34, cxm, cym, b.h * 0.92);
+  halo.addColorStop(0, 'rgba(12,4,26,0.34)');
+  halo.addColorStop(1, 'rgba(12,4,26,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(b.x - b.h * 0.5, y - b.h * 0.5, b.w + b.h, b.h * 2);
 
-  // Face.
-  const g = ctx.createLinearGradient(0, y, 0, y + b.h);
-  g.addColorStop(0, colors[0]);
-  g.addColorStop(0.55, colors[1]);
-  g.addColorStop(1, shadeHex(colors[1], 0.86));
-  roundRectPath(ctx, b.x + 1.5, y, b.w - 3, b.h, rad);
-  ctx.fillStyle = g;
+  // Glass body: tinted, translucent, lit from the upper left.
+  roundRectPath(ctx, b.x, y, b.w, b.h, rad);
+  const body = ctx.createLinearGradient(b.x, y, b.x + b.w * 0.35, y + b.h);
+  body.addColorStop(0, withAlpha(colors[0], 0.5 - press * 0.12));
+  body.addColorStop(0.5, withAlpha(colors[1], 0.42 - press * 0.1));
+  body.addColorStop(1, withAlpha(shadeHex(colors[2], 0.8), 0.6));
+  ctx.fillStyle = body;
   ctx.fill();
 
   ctx.save();
   ctx.clip();
 
-  // Specular sheen: a wide flattened arc across the top third.
-  ctx.beginPath();
-  ctx.ellipse(
-    b.x + b.w / 2,
-    y - b.h * 0.42,
-    b.w * 0.46,
-    b.h * 0.62,
-    0,
-    0,
-    Math.PI * 2,
+  // Interior light pooling in the upper-left, falling away to nothing. This
+  // is the only thing giving the well its curvature.
+  const pool = ctx.createRadialGradient(
+    b.x + b.w * 0.3,
+    y + b.h * 0.24,
+    b.h * 0.04,
+    b.x + b.w * 0.3,
+    y + b.h * 0.24,
+    b.h * 0.95,
   );
-  const sheen = ctx.createLinearGradient(0, y, 0, y + b.h * 0.6);
-  sheen.addColorStop(0, 'rgba(255,255,255,0.5)');
-  sheen.addColorStop(1, 'rgba(255,255,255,0.06)');
-  ctx.fillStyle = sheen;
-  ctx.fill();
+  pool.addColorStop(0, `rgba(255,255,255,${0.26 - press * 0.1})`);
+  pool.addColorStop(0.55, 'rgba(255,255,255,0.05)');
+  pool.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = pool;
+  ctx.fillRect(b.x, y, b.w, b.h);
 
-  // Bounce light off the lip, along the bottom inside edge.
-  const bounce = ctx.createLinearGradient(0, y + b.h, 0, y + b.h * 0.68);
-  bounce.addColorStop(0, 'rgba(255,255,255,0.3)');
-  bounce.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = bounce;
-  ctx.fillRect(b.x, y + b.h * 0.68, b.w, b.h * 0.32);
+  // Shadow gathering in the lower-right, opposite the light.
+  const deep = ctx.createLinearGradient(b.x, y + b.h * 0.45, b.x + b.w * 0.2, y + b.h);
+  deep.addColorStop(0, 'rgba(14,4,30,0)');
+  deep.addColorStop(1, 'rgba(14,4,30,0.4)');
+  ctx.fillStyle = deep;
+  ctx.fillRect(b.x, y + b.h * 0.4, b.w, b.h * 0.6);
   ctx.restore();
 
-  // Rim light along the very top.
-  roundRectPath(ctx, b.x + 1.5, y, b.w - 3, b.h, rad);
-  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
-  ctx.lineWidth = 1.4;
+  // Rim: bright along the top-left where glass catches light, fading to
+  // nothing by the bottom-right. A full-perimeter stroke is exactly the
+  // keyline this design is trying to get rid of.
+  roundRectPath(ctx, b.x + 0.75, y + 0.75, b.w - 1.5, b.h - 1.5, rad);
+  const rim = ctx.createLinearGradient(b.x, y, b.x + b.w * 0.6, y + b.h);
+  rim.addColorStop(0, `rgba(255,255,255,${0.5 - press * 0.22})`);
+  rim.addColorStop(0.45, 'rgba(255,255,255,0.11)');
+  rim.addColorStop(1, 'rgba(255,255,255,0.03)');
+  ctx.strokeStyle = rim;
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
   const cx = b.x + b.w / 2;
@@ -237,6 +267,23 @@ export function drawButton(
     ctx.fillText(b.label, cx, cy);
   }
   ctx.restore();
+}
+
+/**
+ * Re-express a colour at a given alpha.
+ *
+ * Accepts both `#rrggbb` and the `rgb(r,g,b)` that `shadeHex` hands back, so
+ * the two can be composed without the caller caring which it is holding.
+ */
+function withAlpha(color: string, a: number): string {
+  const k = Math.max(0, Math.min(1, a));
+  if (color[0] === '#') {
+    const n = parseInt(color.slice(1), 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${k})`;
+  }
+  const m = color.match(/-?\d+(\.\d+)?/g);
+  if (!m || m.length < 3) return color;
+  return `rgba(${m[0]},${m[1]},${m[2]},${k})`;
 }
 
 /** Multiply a hex colour toward black, for deriving a button's lower face. */

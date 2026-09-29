@@ -324,3 +324,71 @@ the lip; and a specular sheen that is an *arc*, because a straight-edged
 highlight is the clearest tell of a flat shape. Pressing sinks the face into
 the lip instead of moving the whole button, so the travel is visible against
 a fixed silhouette.
+
+
+## UI icons, second pass: bevel is not form
+
+The first 3D treatment stamped each glyph three times — shadow, one offset
+extrusion, lit face. That gives a *bevel*, and at icon size a bevel reads as
+letterpress: you can see the exact pixel where the side wall stops and the
+face begins, and the result looks like a print effect rather than an object.
+
+Two changes turned it into a form.
+
+**Sweep the extrusion, don't step it.** The wall is now a stack of copies from
+`depth` up to 0, each a shade lighter, so the side turns continuously into the
+face with no seam. Step count follows depth so consecutive offsets stay under
+a pixel apart.
+
+**Inflate the geometry.** Every filled path in `trace()` is now also stroked
+with a round-joined pen. That one change is what separates "vector glyph" from
+"moulded object": corners gain a real radius, thin necks thicken, and the
+silhouette loses the mathematically sharp points that read as flat no matter
+how well the face is lit.
+
+On top of those, an upper-left gloss and a bottom ambient occlusion, both
+composited `source-atop` so they can only land on the icon itself — no second
+set of paths, no clip region to get wrong.
+
+**A bug worth remembering.** The mechanical edit that introduced the inflating
+helper replaced every `ctx.fill();` inside `trace()` with `solid();` —
+*including the one inside the definition of `solid` itself*. The result was
+infinitely recursive, and the only symptom was `Maximum call stack size
+exceeded` with no other clue, because `shots.mjs` reports the message and not
+the stack. `tools/err-probe.mjs` exists now to print the full stack; for a
+stack-overflow the repeating frame *is* the diagnosis.
+
+## Buttons: no more moulded plastic
+
+The old treatment was the classic mobile-game button — opaque face on a
+coloured lip, hard keyline, bright elliptical sheen across the top. It is a
+well-understood look and it was fighting everything else on screen: the
+candies already carry the gloss, the backdrop already carries the depth, and
+seven opaque lozenges stamped over both flattened the composition into
+UI-on-a-game.
+
+What replaced it has no lip, no keyline and no sheen arc. The body is a
+translucent well that lets the backdrop through, lit from the upper left and
+darkening as it turns away; the only hard element is a hairline along the
+top-left edge where a glass rim would actually catch light. A full-perimeter
+stroke is exactly the keyline the design is trying to lose. The icon then sits
+on that as the one solid, fully-lit object — which is the thing the player is
+meant to be looking at.
+
+All gradient fills, no filters and no `shadowBlur`: this runs for every button
+every frame, and the software rasteriser charges roughly 50x for a blur.
+
+## Two new special candies
+
+`laserH`/`laserV` borrow the striped candy's vocabulary rather than inventing
+their own — three bands instead of stripes-everywhere, a fat lit core with two
+thinner outriders, which is literally what the detonation does to the board.
+Glow wings drawn behind the silhouette with `destination-over` extend the axis
+past the candy so the firing direction survives being surrounded.
+
+`vortex` had the opposite problem: every other special says "I will clear this
+shape around me", and this one has to say "I will go and find my colour". It
+gets an inward spiral with a hot eye plus four rim chevrons pointing *in* —
+inward-pointing marks are the one piece of iconography nothing else on the
+board uses, which is exactly why they were chosen. There is no chance of
+reading it as a nova at a glance.

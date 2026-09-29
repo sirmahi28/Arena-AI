@@ -7,7 +7,16 @@ import {
 } from './types';
 import { clamp, easeInCubic, easeOutBack, easeOutCubic, randInt } from './rng';
 
-export type FireKind = 'stripeH' | 'stripeV' | 'wrapped' | 'cross' | 'nova' | 'bomb';
+export type FireKind =
+  | 'stripeH'
+  | 'stripeV'
+  | 'wrapped'
+  | 'cross'
+  | 'nova'
+  | 'laserH'
+  | 'laserV'
+  | 'vortex'
+  | 'bomb';
 
 export interface BoardHooks {
   /** A tile reached the peak of its pop animation — spawn the burst. */
@@ -15,7 +24,20 @@ export interface BoardHooks {
   /** A special candy detonated. */
   onFire(kind: FireKind, col: number, row: number, color: ColorId, span: number): void;
   /** Colour-bomb zap line. */
-  onTracer(fromCol: number, fromRow: number, toCol: number, toRow: number, color: ColorId): void;
+  /**
+   * One colour-bomb bolt was fired. `step`/`total` let the presentation
+   * build — rising pitch, growing spark — across the sequence, which is the
+   * whole point of firing them one at a time.
+   */
+  onTracer(
+    fromCol: number,
+    fromRow: number,
+    toCol: number,
+    toRow: number,
+    color: ColorId,
+    step: number,
+    total: number,
+  ): void;
   /** A falling tile touched down. `force` is 0..1. */
   onLand(tile: Tile, force: number): void;
   /** One cascade step finished resolving. */
@@ -61,6 +83,15 @@ interface Zap {
   fromRow: number;
   to: number;
   color: ColorId;
+  /**
+   * Draw the bolt travelling target -> source instead of source -> target.
+   *
+   * A colour bomb reaches out and a vortex pulls in. Same queue, same
+   * stagger, same lock-on marks — only the direction of the streak differs,
+   * so one flag is cheaper and far less error-prone than a parallel
+   * sequencing path for the second special.
+   */
+  inward?: boolean;
 }
 
 /**
@@ -71,20 +102,39 @@ interface Zap {
  * and it stops reading as one event and starts feeling like the game has
  * taken the turn away from you.
  */
-const ZAP_STAGGER = 0.016;
-const ZAP_HOLD = 0.1;
-const ZAP_MAX_TOTAL = 0.34;
+/**
+ * Colour-bomb targeting rhythm.
+ *
+ * These were 16ms / 0.1s / 0.34s, which is not a sequence — it is a single
+ * flash with a slight smear. Every target lit at once, the board went white,
+ * and the one thing a colour bomb should communicate (look how many of these
+ * I just found) was over before the eye could follow it.
+ *
+ * 75ms per bolt is slow enough to read individually and fast enough to feel
+ * like a machine gun rather than a queue. The total is capped so a 25-target
+ * wipe does not outstay its welcome, and `HOLD` is the beat of silence after
+ * the last bolt lands — the pause is what makes the simultaneous detonation
+ * land as a payoff instead of as the tail of the same animation.
+ */
+/** How many same-coloured candies a vortex drags in. */
+const VORTEX_PULL = 9;
+
+const ZAP_STAGGER = 0.075;
+const ZAP_HOLD = 0.19;
+const ZAP_MAX_TOTAL = 1.15;
 
 /**
  * The geometry of a match, which decides what it forges.
  *
  * `line`   — a plain run of 3, 4 or 5+.
  * `square` — the group contains a 2x2 block of one colour.
+ * `block`  — it contains a 2x3 or larger slab, which is strictly harder to
+ *            build than a 2x2 and now forges accordingly.
  * `L`      — two runs crossing at the end of both: a corner.
  * `T`      — crossing at the middle of one run and the end of the other.
  * `plus`   — crossing at the middle of both.
  */
-export type MatchShape = 'line' | 'square' | 'L' | 'T' | 'plus';
+export type MatchShape = 'line' | 'square' | 'block' | 'L' | 'T' | 'plus';
 
 interface Run {
   cells: number[];
@@ -382,7 +432,16 @@ export class Board {
       if (t.spawnT < 1) t.spawnT = Math.min(1, t.spawnT + dt * 3.4);
       if (t.hint > 0) t.hint = Math.max(0, t.hint - dt * 2);
       if (t.jelly > 0) t.jelly = Math.max(0, t.jelly - dt * 2.6);
-      if (t.special !== 'none') t.rot = Math.sin(this.time * 2.2 + t.id) * 0.08;
+      // Specials idle-wobble to advertise themselves, but a candy that is
+      // *popping* must not rotate. `commitClear` zeroes `rot`, and this line
+      // used to put it straight back the very next frame, so every special
+      // caught in a match spun through its whole pop. On a lacquered candy
+      // that is especially bad: the painted highlight swims around the body
+      // and the piece stops reading as a solid object at exactly the moment
+      // it is under the most attention.
+      if (t.special !== 'none' && t.state !== 'clearing') {
+        t.rot = Math.sin(this.time * 2.2 + t.id) * 0.08;
+      }
     }
   }
 
@@ -671,7 +730,44 @@ export class Board {
       }
     }
 
-    // 2x2 block anywhere inside the group.
+    /*
+     * Slabs, largest first.
+     *
+     * A 2x3 contains a 2x2, so the order here is the whole test: checking
+     * for the bigger shape first is what stops every slab on the board from
+     * being rounded down to `square`. The two orientations are checked
+     * separately rather than by transposing the set, which would cost an
+     * allocation per group on a path that runs for every match.
+     */
+    const inSet = (c: number, r: number) =>
+      c >= 0 && r >= 0 && c < cols && cellSet.has(r * cols + c);
+
+    for (const cell of cellSet) {
+      const c0 = cell % cols;
+      const r0 = Math.floor(cell / cols);
+      // 2 rows x 3 columns.
+      if (
+        inSet(c0 + 1, r0) &&
+        inSet(c0 + 2, r0) &&
+        inSet(c0, r0 + 1) &&
+        inSet(c0 + 1, r0 + 1) &&
+        inSet(c0 + 2, r0 + 1)
+      ) {
+        return 'block';
+      }
+      // 3 rows x 2 columns.
+      if (
+        inSet(c0 + 1, r0) &&
+        inSet(c0, r0 + 1) &&
+        inSet(c0 + 1, r0 + 1) &&
+        inSet(c0, r0 + 2) &&
+        inSet(c0 + 1, r0 + 2)
+      ) {
+        return 'block';
+      }
+    }
+
+    // Plain 2x2 anywhere inside the group.
     for (const c of cellSet) {
       if (c % cols === cols - 1) continue;
       if (cellSet.has(c + 1) && cellSet.has(c + cols) && cellSet.has(c + cols + 1)) return 'square';
@@ -738,12 +834,30 @@ export class Board {
        * A straight five still outranks everything: the colour bomb stays the
        * top of the ladder.
        */
+      /*
+       * The forge ladder, strongest shape first.
+       *
+       * Six-and-up is tested before five so a long run stops being rounded
+       * down to a colour bomb, and `block` before `square` so a slab is not
+       * rounded down to the 2x2 hiding inside it.
+       *
+       * The `square` rung moved from wrapped to vortex to fix a duplicate
+       * that had been there from the start: a corner and a 2x2 are quite
+       * different things to build and both paid out the same wrapped candy,
+       * so one of the two shapes was effectively invisible. Giving 2x2 its
+       * own special is also what makes the vortex *reachable* — gated behind
+       * a 2x3 slab it forged about once every 1500 moves, which is to say
+       * most players would never once have seen it.
+       */
       let special: Special = 'none';
-      if (g.maxH >= 5 || g.maxV >= 5) special = 'bomb';
+      if (g.maxH >= 6) special = 'laserH';
+      else if (g.maxV >= 6) special = 'laserV';
+      else if (g.maxH >= 5 || g.maxV >= 5) special = 'bomb';
+      else if (g.shape === 'block') special = 'nova';
       else if (g.shape === 'plus') special = 'nova';
       else if (g.shape === 'T') special = 'cross';
       else if (g.shape === 'L') special = 'wrapped';
-      else if (g.shape === 'square') special = 'wrapped';
+      else if (g.shape === 'square') special = 'vortex';
       else if (g.maxH === 4) special = 'stripeH';
       else if (g.maxV === 4) special = 'stripeV';
 
@@ -802,6 +916,18 @@ export class Board {
       this.pendingMarked = marked;
       this.zapCursor = 0;
       this.zapT = 0;
+      /*
+       * Fire nearest-first. The queue comes out of a left-to-right scan of
+       * the tile array, so unsorted it hops around the board at random and
+       * the sequence reads as noise. Ordering by distance from the bomb
+       * turns the same bolts into a wavefront spreading outwards, which is
+       * legible at a glance and costs one sort of at most a few dozen items.
+       */
+      this.zapQueue.sort((p, q) => {
+        const dp = (p.to % this.cols - p.fromCol) ** 2 + (Math.floor(p.to / this.cols) - p.fromRow) ** 2;
+        const dq = (q.to % this.cols - q.fromCol) ** 2 + (Math.floor(q.to / this.cols) - q.fromRow) ** 2;
+        return dp - dq;
+      });
       // Big clears would otherwise run long, so the stagger tightens to keep
       // the whole sequence inside its budget however many targets there are.
       this.zapStep = Math.min(ZAP_STAGGER, ZAP_MAX_TOTAL / Math.max(1, this.zapQueue.length));
@@ -814,18 +940,34 @@ export class Board {
 
   private updateZapping(dt: number): void {
     this.zapT += dt;
-    while (
-      this.zapCursor < this.zapQueue.length &&
-      this.zapT >= this.zapCursor * this.zapStep
-    ) {
+    const total = this.zapQueue.length;
+    while (this.zapCursor < total && this.zapT >= this.zapCursor * this.zapStep) {
       const z = this.zapQueue[this.zapCursor++];
       const t = this.tiles[z.to];
       if (!t) continue;
-      this.hooks.onTracer(z.fromCol, z.fromRow, t.col, t.row, z.color);
-      // The target lights up as the bolt reaches it, so by the time the
-      // burst goes off the player can already see everything it caught.
-      t.glow = Math.max(t.glow, 0.9);
-      t.squash = Math.max(t.squash, 0.22);
+      if (z.inward) {
+        this.hooks.onTracer(t.col, t.row, z.fromCol, z.fromRow, z.color, this.zapCursor, total);
+      } else {
+        this.hooks.onTracer(z.fromCol, z.fromRow, t.col, t.row, z.color, this.zapCursor, total);
+      }
+      t.squash = Math.max(t.squash, 0.26);
+      t.jelly = 1;
+      t.jellyPhase = this.time * 6;
+    }
+
+    /*
+     * Hold every target already claimed at full glow until the blast.
+     *
+     * `updateVisuals` decays glow at 2.4/s, which over a sequence that now
+     * runs the better part of a second means the first candies hit have gone
+     * dark again by the time the last one is marked. Re-asserting it every
+     * frame is what turns the sequence into an accumulating lock-on — the
+     * player watches the set of doomed candies *grow*, and the simultaneous
+     * detonation then reads as one decision rather than as a series of them.
+     */
+    for (let i = 0; i < this.zapCursor; i++) {
+      const t = this.tiles[this.zapQueue[i].to];
+      if (t) t.glow = 1;
     }
 
     const done = this.zapQueue.length * this.zapStep + ZAP_HOLD;
@@ -903,6 +1045,52 @@ export class Board {
         }
       }
       this.hooks.onFire('nova', t.col, t.row, t.color, 5);
+    } else if (t.special === 'laserH' || t.special === 'laserV') {
+      // Three lanes, not one. The centre lane is the run that forged it and
+      // the two outriders are what make it worth building six of a colour.
+      const horizontal = t.special === 'laserH';
+      const centre = horizontal ? t.row : t.col;
+      const limit = horizontal ? rows : cols;
+      for (let d = -1; d <= 1; d++) {
+        const lane = centre + d;
+        if (lane < 0 || lane >= limit) continue;
+        if (horizontal) {
+          for (let c = 0; c < cols; c++) out.push(idx(c, lane, cols));
+        } else {
+          for (let r = 0; r < rows; r++) out.push(idx(lane, r, cols));
+        }
+      }
+      this.hooks.onFire(t.special, t.col, t.row, t.color, horizontal ? cols : rows);
+    } else if (t.special === 'vortex') {
+      /*
+       * Reaches across the board for its own colour, nearest first.
+       *
+       * Capped at VORTEX_PULL because uncapped it is a colour bomb with a
+       * different sprite — on a board that has drifted colour-heavy it would
+       * routinely take twenty-plus candies and make the actual colour bomb
+       * pointless. A fixed, smallish catch keeps it a precision tool: strong
+       * because you can see exactly what it will take, not because it takes
+       * everything.
+       */
+      const mine: Array<{ i: number; d: number }> = [];
+      for (let i = 0; i < this.tiles.length; i++) {
+        const o = this.tiles[i];
+        if (!o || o === t || o.color !== t.color || o.color === BOMB_COLOR) continue;
+        mine.push({ i, d: (o.col - t.col) ** 2 + (o.row - t.row) ** 2 });
+      }
+      mine.sort((a, b) => a.d - b.d);
+      out.push(idx(t.col, t.row, cols));
+      for (const m of mine.slice(0, VORTEX_PULL)) {
+        out.push(m.i);
+        this.zapQueue.push({
+          fromCol: t.col,
+          fromRow: t.row,
+          to: m.i,
+          color: t.color,
+          inward: true,
+        });
+      }
+      this.hooks.onFire('vortex', t.col, t.row, t.color, mine.length);
     } else if (t.special === 'bomb') {
       // Caught in a chain: vaporise the most common colour on the board.
       const tally = new Map<ColorId, number>();
@@ -942,8 +1130,13 @@ export class Board {
      * changes. Sixteen new branches would have been sixteen new ways to be
      * subtly wrong.
      */
-    const stripe = (s: Special) => s === 'stripeH' || s === 'stripeV' || s === 'cross';
-    const area = (s: Special) => s === 'wrapped' || s === 'nova';
+    // A laser is a line special that happens to be three lanes thick and a
+    // vortex is an area special that happens to choose its own area, so both
+    // classify into the pairings that already exist rather than adding a
+    // second dimension to the table.
+    const stripe = (s: Special) =>
+      s === 'stripeH' || s === 'stripeV' || s === 'cross' || s === 'laserH' || s === 'laserV';
+    const area = (s: Special) => s === 'wrapped' || s === 'nova' || s === 'vortex';
     const big = sa === 'nova' || sb === 'nova' ? 2 : 1;
 
     // Bomb + bomb: wipe the board.
