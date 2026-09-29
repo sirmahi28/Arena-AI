@@ -1,0 +1,88 @@
+:root {
+  --bg-deep: #150a29;
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-deep);
+  overscroll-behavior: none;
+  touch-action: none;
+  font-family: 'Baloo 2', 'Nunito', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+  display: block;
+}
+
+#stage {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* ---- Landscape nudge (phones only) ---- */
+#rotate-hint {
+  position: fixed;
+  inset: 0;
+  display: none;
+  place-items: center;
+  background: radial-gradient(circle at 50% 40%, #2a1350, #0d0619 70%);
+  z-index: 50;
+}
+
+.rotate-card {
+  text-align: center;
+  color: #fff;
+  padding: 28px 34px;
+}
+
+.rotate-icon {
+  font-size: 58px;
+  animation: tilt 1.8s ease-in-out infinite;
+}
+
+.rotate-card p {
+  margin-top: 14px;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  line-height: 1.5;
+}
+
+.rotate-card span {
+  font-size: 14px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+@keyframes tilt {
+  0%,
+  100% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(78deg);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 480px) {
+  #rotate-hint {
+    display: grid;
+  }
+}
