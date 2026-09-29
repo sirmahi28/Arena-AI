@@ -1,5 +1,10 @@
 # Art notes
 
+> **Before generating art:** if more than two candidates are produced for the
+> same decision, all of them go to the project owner to choose from. See
+> `AGENTS.md`. This has been got wrong twice and both times the pick had to
+> be reversed.
+
 The game ships **three** image files, 121 KB in total. Everything else on
 screen — every button, icon, star, particle, stripe and wrapper — is still
 drawn from code at runtime.
