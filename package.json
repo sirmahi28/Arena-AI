@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Sugar Rush — a juicy mobile-first match-3 game built with Canvas 2D",
+  "description": "Sugar Rush \u2014 a juicy mobile-first match-3 game built with Canvas 2D",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -15,7 +15,8 @@
     "test:boosters": "node tools/booster-sim.mjs 1200",
     "test:calibrate": "node tools/board-sim.mjs 300 --calibrate",
     "shots": "node tools/shots.mjs",
-    "setup:chromium": "node tools/setup-chromium.mjs"
+    "setup:chromium": "node tools/setup-chromium.mjs",
+    "art": "node tools/build-art.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",

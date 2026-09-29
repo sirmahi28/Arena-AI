@@ -1,4 +1,5 @@
 import { rand } from '../core/rng';
+import bgUrl from '../assets/bg.webp';
 
 interface Blob {
   x: number;
@@ -51,11 +52,30 @@ export class Background {
   private w = 0;
   private h = 0;
 
+  /**
+   * The painted backdrop. Everything else in here (rays, stars, bokeh,
+   * vignette) is still drawn live on top of it — a static image alone reads
+   * as a dead wallpaper, and the moving layers are what sell it as a place.
+   *
+   * Until it decodes we fall back to `base`, the procedural gradient that
+   * used to be the whole background. That also covers the case where the
+   * canvas is a wildly different aspect ratio to the artwork.
+   */
+  private photo: HTMLImageElement | null = null;
   private base: HTMLCanvasElement | null = null;
   private vignette: HTMLCanvasElement | null = null;
   private rays: HTMLCanvasElement | null = null;
   private starTex: HTMLCanvasElement | null = null;
   private stars: { x: number; y: number; r: number; phase: number; rate: number }[] = [];
+
+  constructor() {
+    const img = new Image();
+    img.decoding = 'async';
+    img.src = bgUrl;
+    img.onload = () => {
+      this.photo = img;
+    };
+  }
 
   resize(w: number, h: number): void {
     this.w = w;
@@ -204,7 +224,22 @@ export class Background {
 
   render(ctx: CanvasRenderingContext2D): void {
     const { w, h } = this;
+    // The procedural wash always goes down first: it is the fallback before
+    // the artwork decodes, and it fills the letterbox if the viewport is a
+    // very different shape to the painting.
     if (this.base) ctx.drawImage(this.base, 0, 0, w, h);
+
+    if (this.photo) {
+      // Cover fit, anchored slightly low so the candy hills along the bottom
+      // of the painting stay in frame on short screens — that horizon is the
+      // most interesting part of it.
+      const iw = this.photo.naturalWidth;
+      const ih = this.photo.naturalHeight;
+      const scale = Math.max(w / iw, h / ih);
+      const dw = iw * scale;
+      const dh = ih * scale;
+      ctx.drawImage(this.photo, (w - dw) / 2, (h - dh) * 0.62, dw, dh);
+    }
 
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
@@ -218,7 +253,9 @@ export class Background {
     if (this.rays) {
       const rw = w * 1.9;
       const rh = h * 1.05;
-      ctx.globalAlpha = 0.6;
+      // Low: the painting already has shafts baked into it. These exist only
+      // to make that light appear to drift.
+      ctx.globalAlpha = 0.28;
       ctx.drawImage(this.rays, -((this.t * 6) % rw) - w * 0.3, -h * 0.16, rw, rh);
     }
 

@@ -13,3 +13,7 @@ npm-debug.log*
 # Visual-test output (regenerate with `npm run shots`)
 tools/shots/
 dist-standalone/.raw/
+
+# Raw generated art (~2.7 MB). Only the optimised src/assets/*.webp ship.
+# See docs/art-notes.md for the prompts that produced these.
+art-src/

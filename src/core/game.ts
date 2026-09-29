@@ -14,6 +14,7 @@ import {
 import { Background } from '../render/background';
 import { SpriteCache } from '../render/sprites';
 import { BloomPass } from '../render/bloom';
+import logoUrl from '../assets/logo.webp';
 import { ParticleSystem } from '../fx/particles';
 import { FX } from '../fx/emitters';
 import { Floaters } from '../fx/floaters';
@@ -113,6 +114,8 @@ export class Game {
   private starsEarned = 0;
   private overlayT = 0;
   private titleT = 0;
+  /** Painted title art; falls back to drawn text until it decodes. */
+  private logo: HTMLImageElement | null = null;
 
   // input state
   private selected: { col: number; row: number } | null = null;
@@ -131,6 +134,13 @@ export class Game {
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('Canvas 2D is not available');
     this.ctx = ctx;
+
+    const logo = new Image();
+    logo.decoding = 'async';
+    logo.src = logoUrl;
+    logo.onload = () => {
+      this.logo = logo;
+    };
 
     const hooks: BoardHooks = {
       onPop: (t, cascade) => this.fxPop(t, cascade),
@@ -1375,29 +1385,40 @@ export class Game {
     ctx.textBaseline = 'middle';
 
     // ---- title ----
+    // The menu gets the painted logo; the win/lose banners stay as drawn text
+    // because their wording changes and a second and third piece of art would
+    // cost more than it returns.
     const title = menu ? 'SUGAR RUSH' : won ? 'LEVEL CLEAR!' : 'OUT OF MOVES';
-    const titleSize = this.fitSize(ctx, title, inner, Math.min(panelW * 0.145, 48), 900, 1.2);
     const bob = Math.sin(this.titleT * 2.2) * 4;
 
     ctx.save();
-    ctx.translate(w / 2, py + panelH * (won ? 0.16 : 0.19) + bob);
-    ctx.rotate(Math.sin(this.titleT * 1.4) * 0.018);
-    ctx.font = FONT(titleSize, 900);
-    ctx.lineWidth = titleSize * 0.19;
-    ctx.strokeStyle = 'rgba(25,8,45,0.9)';
-    ctx.lineJoin = 'round';
-    ctx.strokeText(title, 0, 0);
-    const tg = ctx.createLinearGradient(0, -titleSize * 0.6, 0, titleSize * 0.7);
-    tg.addColorStop(0, '#ffffff');
-    tg.addColorStop(0.45, this.phase === 'lost' ? '#ff9fb4' : '#ffd23f');
-    tg.addColorStop(1, this.phase === 'lost' ? '#ff3b6b' : '#ff7ab8');
-    ctx.fillStyle = tg;
-    ctx.fillText(title, 0, 0);
+    const art = menu && this.logo;
+    ctx.translate(w / 2, py + panelH * (art ? 0.22 : won ? 0.16 : 0.19) + bob);
+    ctx.rotate(Math.sin(this.titleT * 1.4) * (art ? 0.009 : 0.018));
+
+    if (art && this.logo) {
+      const lw = Math.min(inner, panelW * 0.7);
+      const lh = (lw * this.logo.naturalHeight) / this.logo.naturalWidth;
+      ctx.drawImage(this.logo, -lw / 2, -lh / 2, lw, lh);
+    } else {
+      const titleSize = this.fitSize(ctx, title, inner, Math.min(panelW * 0.145, 48), 900, 1.2);
+      ctx.font = FONT(titleSize, 900);
+      ctx.lineWidth = titleSize * 0.19;
+      ctx.strokeStyle = 'rgba(25,8,45,0.9)';
+      ctx.lineJoin = 'round';
+      ctx.strokeText(title, 0, 0);
+      const tg = ctx.createLinearGradient(0, -titleSize * 0.6, 0, titleSize * 0.7);
+      tg.addColorStop(0, '#ffffff');
+      tg.addColorStop(0.45, this.phase === 'lost' ? '#ff9fb4' : '#ffd23f');
+      tg.addColorStop(1, this.phase === 'lost' ? '#ff3b6b' : '#ff7ab8');
+      ctx.fillStyle = tg;
+      ctx.fillText(title, 0, 0);
+    }
     ctx.restore();
 
     if (menu) {
       // ---- candy sampler ----
-      const cs = Math.min(panelW * 0.17, 66);
+      const cs = Math.min(panelW * 0.115, 46);
       const specials: Array<[number, Special]> = [
         [0, 'stripeH'],
         [3, 'wrapped'],
@@ -1405,7 +1426,7 @@ export class Game {
       ];
       specials.forEach(([color, sp], i) => {
         const cx = w / 2 + (i - 1) * cs * 1.35;
-        const cy = py + panelH * 0.36 + Math.sin(this.titleT * 3 + i * 1.3) * 4;
+        const cy = py + panelH * 0.47 + Math.sin(this.titleT * 3 + i * 1.3) * 4;
         const img = this.sprites.get(color, sp);
         const d = this.sprites.drawSize * (cs / Math.max(1, this.L.cell));
         ctx.save();
@@ -1421,11 +1442,11 @@ export class Game {
       ctx.font = FONT(lineSize, 800);
       ctx.fillStyle = 'rgba(255,255,255,0.8)';
       lines.forEach((ln, i) => {
-        ctx.fillText(ln, w / 2, py + panelH * 0.53 + i * lineSize * 1.5);
+        ctx.fillText(ln, w / 2, py + panelH * 0.585 + i * lineSize * 1.5);
       });
       ctx.font = FONT(lineSize * 0.92, 800);
       ctx.fillStyle = 'rgba(255,255,255,0.48)';
-      ctx.fillText(`Best  ${this.best.toLocaleString()}`, w / 2, py + panelH * 0.675);
+      ctx.fillText(`Best  ${this.best.toLocaleString()}`, w / 2, py + panelH * 0.715);
     } else {
       if (won) {
         const sy = py + panelH * 0.37;

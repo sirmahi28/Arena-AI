@@ -29,16 +29,18 @@ It's built for a phone. On desktop, open devtools and switch to a mobile viewpor
 npm run build:standalone     # → dist-standalone/sugar-rush.html
 ```
 
-That's the entire game — code, art and audio — inlined into a single ~72 KB
+That's the entire game — code, art and audio — inlined into a single ~164 KB
 HTML file. Double-click it, email it to yourself, or copy it onto a phone; it
 needs no server, no install and no network. `npm run verify:standalone` opens
 it over `file://` with **every** network request blocked and checks it still
 boots, paints, takes input and fires its particle effects.
 
-(The art and sound are procedural, so there are no assets to inline — that's
-what makes a single file possible at all. The one remote reference left is the
-Google Fonts stylesheet, deliberately kept as a progressive enhancement: online
-you get Baloo 2, offline you get the system fallback and nothing breaks.)
+(Nearly all the art and *all* the sound is procedural, which is what makes a
+single file possible at all. The only two binary assets — the painted backdrop
+and the title lettering, 64 KB between them — get base64-inlined. The one
+remote reference left is the Google Fonts stylesheet, deliberately kept as a
+progressive enhancement: online you get Baloo 2, offline you get the system
+fallback and nothing breaks.)
 
 | Script | What it does |
 |---|---|
@@ -50,6 +52,7 @@ you get Baloo 2, offline you get the system fallback and nothing breaks.)
 | `npm run test:boosters` | Stress the hammer / shuffle paths that plain swapping never reaches |
 | `npm run test:calibrate` | Difficulty simulation across levels |
 | `npm run shots` | Drives the real game in headless Chromium and screenshots it |
+| `npm run art` | Re-optimise `art-src/*.png` → `src/assets/*.webp` (needs ImageMagick) |
 | `npm run setup:chromium` | Fallback browser install, if Playwright's download is blocked |
 
 ---
@@ -182,8 +185,10 @@ src/
     types.ts  rng.ts      shared vocabulary and easing
   render/
     sprites.ts            procedural candy art, cached per size
-    background.ts         animated backdrop
+    background.ts         painted backdrop + live rays, stars, bokeh
+    bloom.ts              two-radius glow post-process (adaptive)
   fx/                     particles, emitters, floaters, screen shake
+  assets/                 the only two image files — see docs/art-notes.md
   ui/
     hud.ts  icons.ts      canvas widgets and vector glyphs
   audio/sfx.ts            Web Audio synthesis
@@ -192,6 +197,30 @@ src/
 `board.ts` and `game-config.ts` don't touch the DOM. That's the load-bearing
 decision in the whole project: it means the rules and the balance can be tested
 headlessly at thousands of moves per second, without a browser.
+
+### Two images, and everything else is code
+
+The game ships exactly two binary assets: a painted backdrop (19 KB) and the
+title lettering (45 KB). Every candy, button, icon, star and particle is drawn
+from code at runtime.
+
+That split is not dogma, it's what each job actually wants. The backdrop never
+moves and never changes colour, so a painting beats a gradient and smooth
+gradients are the best case a lossy codec ever gets — hence 19 KB. The logo is
+one-off lettering on one screen; hand-coding it in canvas paths would be a lot
+of code for a worse result.
+
+Candies are the opposite on every count. They get tinted to six hues, scaled,
+squashed, stretched, rotated, given three different special overlays and drawn
+at whatever cell size the screen works out to. Sprites would fight all of it.
+
+`docs/art-notes.md` has the generation prompts, the cut-out pipeline and the
+format comparison that landed on WebP (it beat palette PNG on both size *and*
+quality, which does not happen often).
+
+The painting does **not** replace the animated background — the drifting light
+shafts, twinkling stars, floating bokeh and vignette still run on top of it. A
+static image alone reads as dead wallpaper.
 
 ### Candies are drawn, not loaded
 
