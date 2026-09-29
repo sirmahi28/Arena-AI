@@ -392,3 +392,51 @@ gets an inward spiral with a hot eye plus four rim chevrons pointing *in* —
 inward-pointing marks are the one piece of iconography nothing else on the
 board uses, which is exactly why they were chosen. There is no chance of
 reading it as a nova at a glance.
+
+## UI icons, third pass: stop drawing them
+
+The second pass tried harder shading and lost for the same reason the first
+one did. The diagnosis only arrived once the icons were judged at the size
+they are actually drawn — `b.h * 0.52`, about **33 px** in the footer and
+**22 px** in the HUD — instead of in a 256 px art render. `tools/icon-probe.mjs`
+renders every icon at both sizes on the real purple disc and point-upscales
+the result, so what you inspect is the delivered pixels and nothing else.
+
+At 33 px a bevel is two or three pixels wide. It cannot describe a form. The
+whole vocabulary of hand-shaded vector art — inner highlight, extruded side,
+occlusion at the base — was being spent below the resolution where any of it
+survives. No amount of tuning fixes a technique that is out of pixels.
+
+So the icons became artwork, like the candies before them.
+`src/assets/icon-atlas.webp` is a 768×384 sheet, 4×2 cells of **192 px**, 41 KB.
+`src/ui/icons.ts` blits a cell and returns. The old vector code is still
+there and still correct, but it now only runs in the handful of frames before
+the atlas finishes decoding, so the first paint is never empty.
+
+Two numbers matter. `REACH_ICON` is the fraction of its cell each icon fills,
+tuned by eye because hollow shapes (the restart arrow, the gavel) need to run
+larger than solid ones (the play triangle) to carry the same visual weight.
+`ATLAS_SCALE = 1.18` compensates for the fact that the cells average about
+0.9 icon, so blitting at `s` would quietly shrink every icon by a tenth.
+
+### The gavel, and one cell rendered on its own
+
+The owner picked the icon style from a sheet that a sandbox restart then
+destroyed. The regenerated sheet matched the style but drew a **sledgehammer**
+where the approved one had a **judge's gavel** — and that substitution shipped
+without being flagged, which was the real mistake.
+
+The fix is not to reroll the sheet. Seven icons were already signed off and a
+new sheet moves all of them. Instead the gavel is rendered on its own into
+`art-src/hammer-raw.png` and `ICON_OVERRIDE` in `tools/build-art.mjs` swaps it
+in for cell 0, through the same cutout-trim-reach pipeline as every other
+cell. The colour bomb already works this way in the candy atlas. A missing
+override file is not an error; the sheet's own cell is used.
+
+Worth writing down, because it is a property of this sandbox and not of the
+art: **`art-src/` is gitignored and does not survive a restart.** The sheet
+that produced the other seven cells is gone, and those cells now exist only
+inside the committed WebP. `npm run art` will happily skip the icon target
+when its source is absent and leave the shipped file alone — that is the
+behaviour keeping them alive. Anything generated has to become a committed
+asset in the same sitting, or it is not real.

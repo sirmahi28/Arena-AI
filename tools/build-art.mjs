@@ -225,6 +225,20 @@ const ICON_IDS = [
 // play triangle to carry the same weight.
 const REACH_ICON = [0.94, 0.92, 0.9, 0.94, 0.9, 0.9, 0.82, 0.88];
 
+/*
+ * Per-cell overrides, for icons whose sheet render was rejected.
+ *
+ * The owner picked the icon style from a sheet that was then lost to a
+ * sandbox restart, and the regenerated sheet drew a sledgehammer where the
+ * approved one had a gavel. Rather than reroll the whole sheet and risk
+ * moving the seven icons that were already signed off, the one cell is
+ * rendered separately and composited in. Same reason the colour bomb is a
+ * separate source for the candy atlas.
+ *
+ * A missing override file is not an error — the sheet's own cell is used.
+ */
+const ICON_OVERRIDE = { 0: 'art-src/hammer-raw.png' };
+
 target('icon-atlas.webp', ['art-src/icons-raw.png'], () => {
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
@@ -233,7 +247,9 @@ target('icon-atlas.webp', ['art-src/icons-raw.png'], () => {
 
   for (let i = 0; i < ICON_IDS.length; i++) {
     const side = Math.round(REACH_ICON[i] * ICON_CELL);
-    cutout(`${TMP}/i-${i}.png`, `${TMP}/ic-${i}.png`, [
+    const override = ICON_OVERRIDE[i];
+    const from = override && existsSync(override) ? override : `${TMP}/i-${i}.png`;
+    cutout(from, `${TMP}/ic-${i}.png`, [
       // `>` is deliberately absent: fit the longest side to `side` either
       // way, so a small render is scaled up to match its neighbours.
       '-resize', `${side}x${side}`,
