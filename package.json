@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "build:standalone": "node tools/build-standalone.mjs",
+    "verify:standalone": "node tools/verify-standalone.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node tools/board-sim.mjs 1500",
     "test:calibrate": "node tools/board-sim.mjs 300 --calibrate",

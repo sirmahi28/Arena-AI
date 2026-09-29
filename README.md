@@ -23,10 +23,29 @@ npm run dev          # → http://localhost:5173
 It's built for a phone. On desktop, open devtools and switch to a mobile viewport
 (the game works with a mouse too — drag a candy, or tap one then tap its neighbour).
 
+### Or run it with no server at all
+
+```bash
+npm run build:standalone     # → dist-standalone/sugar-rush.html
+```
+
+That's the entire game — code, art and audio — inlined into a single ~72 KB
+HTML file. Double-click it, email it to yourself, or copy it onto a phone; it
+needs no server, no install and no network. `npm run verify:standalone` opens
+it over `file://` with **every** network request blocked and checks it still
+boots, paints, takes input and fires its particle effects.
+
+(The art and sound are procedural, so there are no assets to inline — that's
+what makes a single file possible at all. The one remote reference left is the
+Google Fonts stylesheet, deliberately kept as a progressive enhancement: online
+you get Baloo 2, offline you get the system fallback and nothing breaks.)
+
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite dev server |
 | `npm run build` | Typecheck + production bundle |
+| `npm run build:standalone` | Bundle the whole game into one portable `.html` file |
+| `npm run verify:standalone` | Prove that file runs offline, from `file://`, with no network |
 | `npm test` | Headless rules soak test (1500 simulated moves) |
 | `npm run test:calibrate` | Difficulty simulation across levels |
 | `npm run shots` | Drives the real game in headless Chromium and screenshots it |

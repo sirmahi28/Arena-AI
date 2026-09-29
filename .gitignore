@@ -12,3 +12,4 @@ npm-debug.log*
 
 # Visual-test output (regenerate with `npm run shots`)
 tools/shots/
+dist-standalone/.raw/
