@@ -749,8 +749,12 @@ export class Board {
         const col = f.cell % this.cols;
         const row = Math.floor(f.cell / this.cols);
         const t = this.makeTile(col, row, f.color, f.special);
+        // spawnT drives the pop-in (easeOutBack at render time). Do NOT also
+        // zero t.scale: nothing ever animates that back up for an idle tile,
+        // so the candy would stay invisible forever while still occupying the
+        // cell — gravity would skip it and the board would show a permanent
+        // gap. This was the "random empty square" bug.
         t.spawnT = 0;
-        t.scale = 0;
         this.tiles[f.cell] = t;
         this.hooks.onForge(f.special, col, row, f.color);
       }

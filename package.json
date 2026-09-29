@@ -12,6 +12,7 @@
     "verify:standalone": "node tools/verify-standalone.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node tools/board-sim.mjs 1500",
+    "test:boosters": "node tools/booster-sim.mjs 1200",
     "test:calibrate": "node tools/board-sim.mjs 300 --calibrate",
     "shots": "node tools/shots.mjs",
     "setup:chromium": "node tools/setup-chromium.mjs"

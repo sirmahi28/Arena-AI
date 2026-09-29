@@ -47,6 +47,7 @@ you get Baloo 2, offline you get the system fallback and nothing breaks.)
 | `npm run build:standalone` | Bundle the whole game into one portable `.html` file |
 | `npm run verify:standalone` | Prove that file runs offline, from `file://`, with no network |
 | `npm test` | Headless rules soak test (1500 simulated moves) |
+| `npm run test:boosters` | Stress the hammer / shuffle paths that plain swapping never reaches |
 | `npm run test:calibrate` | Difficulty simulation across levels |
 | `npm run shots` | Drives the real game in headless Chromium and screenshots it |
 | `npm run setup:chromium` | Fallback browser install, if Playwright's download is blocked |
@@ -167,6 +168,7 @@ asserts the invariants that matter after *every single move*:
 - visual positions always converge to logical positions (no desynced tiles)
 - a legal move always exists when control returns to the player
 - the resolver always terminates
+- every settled tile is actually *drawable* — see below
 
 Plus targeted fixtures for each rule — 4-in-a-row forges a striped candy, 5 forges
 a colour bomb, an L-shape forges a wrapped candy, a striped candy chain-clears its
@@ -183,6 +185,33 @@ auto-shuffles into a playable one.
 ✓ dead board auto-shuffles into a playable one
 ✅ all invariants held
 ```
+
+### The bug that hid between two passing checks
+
+A player reported cells that looked empty and never refilled. The soak test was
+green, because it asked the wrong question. It checked `tiles[i] !== null` — is
+a cell occupied? — and every cell *was* occupied.
+
+When a match of 4+ forges a special candy, the new tile was created with both
+`spawnT = 0` (which animates up, driving the pop-in) and `scale = 0` (which
+nothing ever animates back). The renderer multiplies the two and skips anything
+below `0.01`, so the candy was never drawn — while still occupying its cell, so
+gravity skipped it too. A permanent gap, appearing only after a match of 4 or
+more, which is exactly why it felt random.
+
+The fix is one deleted line; `spawnT` alone already expresses the pop-in. The
+lasting change is the invariant, which now mirrors the renderer's own test:
+
+```js
+const drawn = t.scale * (t.spawnT < 1 ? t.spawnT : 1);
+if (!(drawn > 0.01)) fail(`cell looks empty but never refills`);
+```
+
+Verified as a real regression guard by re-introducing the bug with the check in
+place: `❌ tile 319 at 3,2 is invisible after move 74 (scale=0, spawnT=1)`.
+
+`npm run test:boosters` was added at the same time, because the soak only ever
+*swapped* — the hammer and shuffle buttons were never exercised by any test.
 
 ### `npm run test:calibrate` — difficulty simulation
 

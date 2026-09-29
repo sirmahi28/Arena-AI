@@ -89,6 +89,14 @@ function checkSettledInvariants(label) {
       fail(`tile ${t.id} desynced: logical ${t.col},${t.row} visual ${t.x.toFixed(2)},${t.y.toFixed(2)} after ${label}`);
     }
     if (t.state !== 'idle') fail(`tile ${t.id} stuck in state ${t.state} after ${label}`);
+    // 3. Every settled tile must actually be drawable. A tile with scale 0 is
+    //    invisible yet still occupies its cell, so gravity skips it and the
+    //    player sees a permanent empty square. Mirrors the renderer's own
+    //    `s <= 0.01 -> skip` test.
+    const drawn = t.scale * (t.spawnT < 1 ? t.spawnT : 1);
+    if (!(drawn > 0.01)) {
+      fail(`tile ${t.id} at ${t.col},${t.row} is invisible after ${label} (scale=${t.scale}, spawnT=${t.spawnT}) — cell looks empty but never refills`);
+    }
   }
   // 3. No leftover matches.
   const colorAt = (c, r) => (c < 0 || r < 0 || c >= COLS || r >= ROWS ? -99 : board.tiles[idx(c, r, COLS)].color);
