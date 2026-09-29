@@ -440,6 +440,105 @@ function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, h
   ctx.restore();
 }
 
+/**
+ * Cross candy, forged by a tee. It fires down the row *and* the column, so
+ * the marking is a plus: two bright bands crossing at the centre.
+ *
+ * Clipped with `source-atop` like the stripes, so the bands stop at the
+ * painted silhouette instead of at a circle that no longer matches it. Band
+ * strength is read off the measured cell luminance for the same reason the
+ * stripes are — a fixed opacity that reads well on the strawberry bleaches
+ * the lemon to white.
+ */
+function drawCross(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
+  const [, light, dark] = PALETTE[color % PALETTE.length];
+  const lum = cellLum[color] ?? 0.5;
+  const band = r * 0.28;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+
+  // Dark seat under each band, so the bright core has something to sit on
+  // and the plus keeps an edge on a light candy.
+  ctx.fillStyle = withAlpha(shade(dark, 0.9), 0.28 + 0.4 * lum);
+  ctx.fillRect(-r * 1.2, -band * 0.92, r * 2.4, band * 1.84);
+  ctx.fillRect(-band * 0.92, -r * 1.2, band * 1.84, r * 2.4);
+
+  const peak = 0.62 - 0.46 * lum;
+  for (const vertical of [false, true]) {
+    const g = vertical
+      ? ctx.createLinearGradient(-band, 0, band, 0)
+      : ctx.createLinearGradient(0, -band, 0, band);
+    g.addColorStop(0, withAlpha(light, peak * 0.25));
+    g.addColorStop(0.5, withAlpha('#ffffff', peak));
+    g.addColorStop(1, withAlpha(light, peak * 0.25));
+    ctx.fillStyle = g;
+    if (vertical) ctx.fillRect(-band * 0.62, -r * 1.2, band * 1.24, r * 2.4);
+    else ctx.fillRect(-r * 1.2, -band * 0.62, r * 2.4, band * 1.24);
+  }
+
+  // Hot centre where the two bands meet.
+  const c = ctx.createRadialGradient(0, 0, 0, 0, 0, band * 1.3);
+  c.addColorStop(0, withAlpha('#ffffff', 0.85));
+  c.addColorStop(1, withAlpha('#ffffff', 0));
+  ctx.fillStyle = c;
+  ctx.fillRect(-band * 1.3, -band * 1.3, band * 2.6, band * 2.6);
+  ctx.restore();
+}
+
+/**
+ * Nova candy, forged by a plus — the rarest shape on the board, so it is the
+ * only special allowed to break the silhouette with a spiked corona. The
+ * eight points are drawn *behind* the candy with `destination-over` so the
+ * painted body still reads cleanly on top of them.
+ */
+function drawNova(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
+  const [, light, dark, spark] = PALETTE[color % PALETTE.length];
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + Math.PI / 8;
+    const len = i % 2 === 0 ? r * 1.46 : r * 1.16;
+    const w = i % 2 === 0 ? r * 0.2 : r * 0.13;
+    const g = ctx.createLinearGradient(0, 0, Math.cos(a) * len, Math.sin(a) * len);
+    g.addColorStop(0, withAlpha(spark, 0.95));
+    g.addColorStop(0.55, withAlpha(light, 0.8));
+    g.addColorStop(1, withAlpha(light, 0));
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * len, Math.sin(a) * len);
+    ctx.lineTo(Math.cos(a + Math.PI / 2) * w, Math.sin(a + Math.PI / 2) * w);
+    ctx.lineTo(Math.cos(a - Math.PI / 2) * w, Math.sin(a - Math.PI / 2) * w);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Ring inlay on the body itself, clipped to the art.
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-atop';
+  const lum = cellLum[color] ?? 0.5;
+  ctx.strokeStyle = withAlpha(shade(dark, 0.9), 0.3 + 0.35 * lum);
+  ctx.lineWidth = Math.max(1.4, r * 0.15);
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = withAlpha('#ffffff', 0.58 - 0.34 * lum);
+  ctx.lineWidth = Math.max(1, r * 0.075);
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.52, 0, Math.PI * 2);
+  ctx.stroke();
+
+  const c = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.4);
+  c.addColorStop(0, withAlpha('#ffffff', 0.8));
+  c.addColorStop(0.6, withAlpha(spark, 0.35));
+  c.addColorStop(1, withAlpha(spark, 0));
+  ctx.fillStyle = c;
+  ctx.fillRect(-r * 0.4, -r * 0.4, r * 0.8, r * 0.8);
+  ctx.restore();
+}
+
 function drawWrapped(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
   const [, light, dark] = PALETTE[color % PALETTE.length];
 
@@ -637,6 +736,8 @@ export class SpriteCache {
       if (special === 'stripeH') drawStripes(ctx, color, r, true);
       else if (special === 'stripeV') drawStripes(ctx, color, r, false);
       else if (special === 'wrapped') drawWrapped(ctx, color, r);
+      else if (special === 'cross') drawCross(ctx, color, r);
+      else if (special === 'nova') drawNova(ctx, color, r);
       // Last, so `destination-over` tucks it behind the finished piece.
       drawContactShadow(ctx, color, r);
     }

@@ -275,3 +275,47 @@ dark background does not need a dark side — it needs a bright one.
 Compare versions with `npm run fx`, which fires one named effect and captures
 the board at fixed offsets. Screenshot tooling that catches an arbitrary
 frame cannot evaluate something that lives for 400 ms.
+
+## UI icons: flat glyphs on a lit game
+
+The icons were flat white strokes, which was worse than it sounds. Everything
+else on screen — candies, buttons, the logo — has a light source in the upper
+left and a visible sense of thickness, so flat glyphs read as placeholder art
+sitting on top of a finished game.
+
+The fix is structural rather than per-icon. Each icon defines nothing but
+geometry, using whatever fill and stroke the caller has set, and the renderer
+draws that geometry four times: a soft contact shadow, a dark extrusion
+offset straight down, the lit face, and a catchlight clipped to the top edge.
+Add an icon and it gets the treatment for free.
+
+Two things went wrong on the way, both instructive.
+
+**It cost 380 ms a frame** — a five-fold regression. Four traces per icon plus
+a `ctx.filter` blur, seven icons, every frame. None of that work depends on
+anything that changes between frames, so it is now baked once per icon-size
+and the frame does a single blit. That ends up *cheaper* than the flat version
+it replaced, which was re-tracing its paths every frame for a worse result.
+
+**The tints did not show.** The face ramp reached its upper stop within a
+third of the glyph height, and the upper stops were all near-white, so every
+icon rendered as a white shape with a coloured sliver along the bottom. The
+white stop has to be a narrow specular band at the very top and the upper
+tint has to be an actual colour. A near-white palette with a bevel is still
+just white.
+
+The extrusion had the same class of bug: mixing it toward the background
+purple made it a blue ghost copy offset one pixel down, like a misregistered
+print. A side wall has to be a much darker version of the object's *own*
+colour.
+
+Buttons got the same pass. Four things separate a gradient rectangle from a
+moulded plastic button, and all of them are cheap: a deep lip in a darker
+shade of the face colour rather than a grey drop shadow, so the side wall
+looks like the same material; a dark outer keyline, which is what stops the
+button dissolving into a busy background; bounce light along the bottom
+inside edge where a real moulded surface catches light reflected back up off
+the lip; and a specular sheen that is an *arc*, because a straight-edged
+highlight is the clearest tell of a flat shape. Pressing sinks the face into
+the lip instead of moving the whole button, so the travel is visible against
+a fixed silhouette.

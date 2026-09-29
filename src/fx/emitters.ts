@@ -311,6 +311,155 @@ export const FX = {
     });
   },
 
+  /**
+   * The core of a cross detonation. The four beams are already drawn by two
+   * `stripeBeam` calls; this is the thing at the middle that stops them
+   * reading as two unrelated effects that happened to fire on the same
+   * frame.
+   */
+  crossCore(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number) {
+    const [base, light, , spark] = paletteOf(color);
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.3, 0.3],
+      size: [cell * 0.2, cell * 0.2],
+      sizeEnd: cell * 1.5,
+      colors: [spark],
+      shape: 'ring',
+      additive: true,
+      thickness: cell * 0.09,
+    });
+    ps.emit({
+      x,
+      y,
+      count: 8,
+      spread: cell * 0.2,
+      speed: [60, 260],
+      life: [0.3, 0.6],
+      size: [cell * 0.08, cell * 0.15],
+      sizeEnd: 0,
+      drag: 1.1,
+      colors: [spark, light],
+      shape: 'glint',
+      additive: true,
+      spin: [-3, 3],
+    });
+    ps.emit({
+      x,
+      y,
+      count: 10,
+      spread: cell * 0.25,
+      speed: [140, 420],
+      life: [0.3, 0.6],
+      size: [cell * 0.05, cell * 0.13],
+      sizeEnd: 0,
+      gravity: 700,
+      drag: 0.5,
+      colors: [base, light, spark],
+      shape: 'shard',
+      additive: false,
+      spin: [-16, 16],
+    });
+  },
+
+  /**
+   * Nova: the plus-shape detonation. Reads as an upgrade of the wrapped
+   * explosion rather than a different thing — same vocabulary, more of it,
+   * plus four bright arms so the plus that forged it is still legible in
+   * the blast.
+   */
+  nova(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number) {
+    const [base, light, , spark] = paletteOf(color);
+
+    for (let i = 0; i < 4; i++) {
+      const a = (i * Math.PI) / 2;
+      ps.emit({
+        x,
+        y,
+        count: 12,
+        spread: cell * 0.12,
+        speed: [420, 1000],
+        angle: [a - 0.1, a + 0.1],
+        life: [0.26, 0.5],
+        size: [cell * 0.08, cell * 0.2],
+        sizeEnd: 0,
+        drag: 1.5,
+        colors: [spark, light],
+        shape: 'streak',
+        additive: true,
+        stretch: 2.2,
+      });
+    }
+
+    ps.emit({
+      x,
+      y,
+      count: 30,
+      spread: cell * 0.35,
+      speed: [280, 860],
+      life: [0.35, 0.8],
+      size: [cell * 0.06, cell * 0.17],
+      sizeEnd: 0,
+      gravity: 820,
+      drag: 0.5,
+      colors: [base, light, spark],
+      shape: 'shard',
+      additive: false,
+      spin: [-18, 18],
+    });
+
+    ps.emit({
+      x,
+      y,
+      count: 14,
+      spread: cell * 0.3,
+      speed: [120, 500],
+      life: [0.35, 0.7],
+      size: [cell * 0.09, cell * 0.16],
+      sizeEnd: 0,
+      drag: 0.95,
+      colors: [spark, light],
+      shape: 'glint',
+      additive: true,
+      spin: [-3, 3],
+    });
+
+    for (let i = 0; i < 2; i++) {
+      ps.emit({
+        x,
+        y,
+        count: 1,
+        speed: [0, 0],
+        life: [0.4 + i * 0.1, 0.4 + i * 0.1],
+        size: [cell * 0.3, cell * 0.3],
+        sizeEnd: cell * (2.6 + i * 1.6),
+        colors: [i === 0 ? spark : light],
+        shape: 'ring',
+        additive: true,
+        thickness: cell * (0.11 - i * 0.035),
+      });
+    }
+
+    ps.emit({
+      x,
+      y,
+      count: 5,
+      spread: cell * 0.5,
+      speed: [40, 170],
+      life: [0.4, 0.72],
+      size: [cell * 0.24, cell * 0.4],
+      sizeEnd: cell * 0.9,
+      gravity: -140,
+      drag: 1.5,
+      colors: [light, base],
+      shape: 'smoke',
+      additive: true,
+    });
+  },
+
   /** Rainbow colour-bomb ignition. */
   bombBurst(ps: ParticleSystem, x: number, y: number, cell: number) {
     // Saturated hues only. The bomb is the one effect that *should* read as

@@ -81,6 +81,70 @@ a hint. If the board ever runs out of legal moves it reshuffles itself automatic
 
 ---
 
+## The match ladder
+
+Shape decides what a match forges, not just length. The discriminator for the
+three five-cell shapes is one comparison: where the two runs cross.
+
+| Pattern | Forges | Blast |
+|---|---|---|
+| 3 in a line | — | the three |
+| 4 in a line | striped | that whole row or column |
+| 2x2 block inside a group | wrapped | 3x3 |
+| L — runs cross at the **end of both** | wrapped | 3x3 |
+| T — cross at the **middle of one** | **cross** | full row **and** column |
+| plus — cross at the **middle of both** | **nova** | 5x5, corners cut |
+| 5 in a line | colour bomb | every candy of one colour |
+
+L, T and plus all used to forge the same wrapped candy, which threw away the
+information the player had just built. A tee is harder to engineer than a
+corner and a plus is harder still, so each forges something different now.
+
+Two of these can only arrive by cascade, which is worth knowing before trying
+to test them. A plus needs its centre filled last, and every cell orthogonally
+adjacent to that centre is one of its own arms — so there is nothing left to
+swap in from. A 2x2 needs two complete parallel runs, so it already matches
+before the final piece lands. Both are unreachable through `trySwap` by
+construction; the fixtures for them paint the shape and then crush an
+unrelated cell in a far corner, which ends in the same full-board sweep every
+cascade uses.
+
+The two new specials fold into the existing combo table rather than doubling
+it: a cross is a line special that points both ways, a nova is an area
+special that reaches further. Every pairing that already worked keeps working
+and only the radius changes. Sixteen new branches would have been sixteen new
+ways to be subtly wrong.
+
+Difficulty was re-measured after all of it — level 1 clears 97%, level 10
+90%, level 20 58%, against 97/87/56 before. Within noise, so the level
+targets are untouched.
+
+## Tapping a special
+
+Specials fire in place when tapped, not only when matched or swapped. The
+ordering matters: an adjacent selection is handled *first*, so tapping a
+special while a neighbour is selected still swaps — that is how combos get
+built by tap, and losing them silently would be a far worse trade than the
+convenience is worth. Only an unpaired tap fires.
+
+It costs a move. A free detonation would strictly dominate swapping the same
+piece, and the move budget the levels are tuned against would stop meaning
+anything.
+
+## The colour bomb takes its time
+
+A colour bomb used to delete its targets on the frame it fired, which is the
+least satisfying way to spend the best piece in the game: a third of the board
+simply vanished. Now the bolts go out first, one per target on a 16 ms
+stagger, each target lighting up as its bolt lands, and the whole set
+detonates together once the last one arrives. The stagger tightens
+automatically so the sequence always fits inside ~340 ms — any longer and it
+stops reading as one event and starts feeling like the game has taken the
+turn away from you.
+
+Nothing about *what* clears changed. It is a new board phase in front of the
+existing one, so no cascade or scoring path had to learn a new shape.
+
 ## Where the juice comes from
 
 "Juicy" isn't one effect, it's a pile of small ones firing together. Every candy
@@ -93,7 +157,13 @@ that pops triggers:
 - **Radiating speed lines** and **four-point glints**
 - **Sugar dust** drifting upward
 - **A physical shove to every neighbouring candy** — see below
-- **Squash-and-stretch** — candies inflate before they implode, and land with a bounce
+- **Squash-and-stretch** — a quick anticipatory squat, then an overshooting
+  inflate, then a fast implode, with the squash axis flipping between the two
+  halves so the candy visibly stretches before it goes. It used to spin as
+  well; spin is the cheapest possible way to signal "something is happening"
+  and it fought the art, because these pieces have a painted highlight and a
+  fixed light source, so rotating them made the highlight swim and the candy
+  read as a flat sticker being twirled
 - **Screen shake** using a trauma model (shake² so small hits stay subtle and big
   ones really kick), plus **hit-stop** that freezes time for ~50 ms on a detonation
 - **A screen flash**, colour-matched to whatever just exploded

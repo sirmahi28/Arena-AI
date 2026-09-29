@@ -33,8 +33,9 @@ const stats = {
   cleared: 0,
   cascades: 0,
   maxCascade: 0,
-  forged: { stripeH: 0, stripeV: 0, wrapped: 0, bomb: 0 },
-  fires: { stripeH: 0, stripeV: 0, wrapped: 0, bomb: 0 },
+  forgeLog: [],
+  forged: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, bomb: 0 },
+  fires: { stripeH: 0, stripeV: 0, wrapped: 0, cross: 0, nova: 0, bomb: 0 },
   shuffles: 0,
   points: 0,
 };
@@ -50,7 +51,7 @@ const hooks = {
     stats.cascades++;
     stats.maxCascade = Math.max(stats.maxCascade, step);
   },
-  onForge: (special) => { stats.forged[special]++; },
+  onForge: (special) => { stats.forged[special]++; stats.forgeLog.push(special); },
   onReject: () => { stats.rejected++; },
   onSwapStart: () => {},
   onScore: (p) => { stats.points += p; },
@@ -203,11 +204,74 @@ function runTo(b, label) {
 {
   const b = cleanBoard({ '0,4': 0, '1,4': 0, '2,5': 0, '2,6': 0, '2,3': 0 });
   assertClean(b, 'wrapped fixture');
-  const before = stats.forged.wrapped;
+  const mark = stats.forgeLog.length;
   if (!b.trySwap(2, 4, 2, 3)) fail('wrapped fixture: swap refused');
   runTo(b, 'wrapped fixture');
-  if (stats.forged.wrapped - before !== 1) fail('an L-shaped match should forge a wrapped candy');
-  console.log('✓ L-shaped match forges a wrapped candy');
+  // Only the first forge belongs to the fixture; anything after it came out
+  // of the cascade that followed and is not what we are testing.
+  if (stats.forgeLog[mark] !== 'wrapped') {
+    fail(`an L-shaped match should forge a wrapped candy (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ L-shaped match forges a wrapped candy, not a cross');
+}
+
+// T-shape (3 across crossing the middle, 3 down from the end) -> cross candy.
+//
+// The shape ladder is the whole point of the matcher, so it needs a
+// deterministic test and not just a tally from the random run. Note that only
+// L and T can be built by a single swap at all: a plus needs its centre
+// filled last, and every cell orthogonally adjacent to that centre is one of
+// its own arms, so there is nothing left to swap in from. Same for a 2x2,
+// which needs two complete parallel runs and therefore already matches before
+// the final piece arrives. Both shapes are cascade-only in real play, and the
+// random soak below is what covers them.
+{
+  const b = cleanBoard({ '1,4': 0, '3,4': 0, '4,4': 1, '2,5': 0, '2,6': 0, '2,3': 0 });
+  assertClean(b, 'cross fixture');
+  const mark = stats.forgeLog.length;
+  if (!b.trySwap(2, 4, 2, 3)) fail('cross fixture: swap refused');
+  runTo(b, 'cross fixture');
+  if (stats.forgeLog[mark] !== 'cross') {
+    fail(`a T-shaped match should forge a cross candy (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ T-shaped match forges a cross candy, not a wrapped');
+}
+
+/*
+ * Plus and 2x2 cannot be reached through `trySwap` at all, so they are driven
+ * a different way: paint the shape onto a settled board, then crush an
+ * unrelated cell in a far corner. That clears one candy, runs gravity in that
+ * column only, and ends in the same full-board `findMatches` sweep every
+ * cascade uses — which is exactly the path these shapes arrive on in real
+ * play.
+ */
+
+// Plus (3 across and 3 down crossing at the middle of both) -> nova candy.
+{
+  const b = cleanBoard({ '2,3': 0, '1,4': 0, '2,4': 0, '3,4': 0, '2,5': 0, '4,4': 1, '2,2': 1 });
+  const mark = stats.forgeLog.length;
+  if (!b.crushAt(6, 8)) fail('nova fixture: crush refused');
+  runTo(b, 'nova fixture');
+  if (stats.forgeLog[mark] !== 'nova') {
+    fail(`a plus-shaped match should forge a nova candy (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ plus-shaped match forges a nova candy');
+}
+
+// 2x2 block (two parallel runs one line apart) -> wrapped candy.
+{
+  const b = cleanBoard({
+    '1,4': 0, '2,4': 0, '3,4': 0,
+    '1,5': 0, '2,5': 0, '3,5': 0,
+    '4,4': 1,
+  });
+  const mark = stats.forgeLog.length;
+  if (!b.crushAt(6, 8)) fail('square fixture: crush refused');
+  runTo(b, 'square fixture');
+  if (stats.forgeLog[mark] !== 'wrapped') {
+    fail(`a 2x2 block should forge a wrapped candy (got ${stats.forgeLog[mark]})`);
+  }
+  console.log('✓ 2x2 square block forges a wrapped candy');
 }
 
 // A striped candy caught in a match clears its whole row.
@@ -271,8 +335,8 @@ console.log(`
  moves simulated   ${stats.moves}
  candies cleared   ${stats.cleared}
  cascade steps     ${stats.cascades}  (deepest chain: ${stats.maxCascade + 1}x)
- specials forged   striped ${stats.forged.stripeH + stats.forged.stripeV} · wrapped ${stats.forged.wrapped} · bombs ${stats.forged.bomb}
- specials fired    striped ${stats.fires.stripeH + stats.fires.stripeV} · wrapped ${stats.fires.wrapped} · bombs ${stats.fires.bomb}
+ specials forged   striped ${stats.forged.stripeH + stats.forged.stripeV} · wrapped ${stats.forged.wrapped} · cross ${stats.forged.cross} · nova ${stats.forged.nova} · bombs ${stats.forged.bomb}
+ specials fired    striped ${stats.fires.stripeH + stats.fires.stripeV} · wrapped ${stats.fires.wrapped} · cross ${stats.fires.cross} · nova ${stats.fires.nova} · bombs ${stats.fires.bomb}
  auto-shuffles     ${stats.shuffles}
  total points      ${stats.points.toLocaleString()}
  avg frames/move   ${avgFrames}  (~${(avgFrames / 60).toFixed(2)}s of animation)

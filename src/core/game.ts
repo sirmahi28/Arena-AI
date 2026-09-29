@@ -399,6 +399,25 @@ export class Game {
       this.shake.flash(light, 0.1);
       sfx.stripe();
       buzz(18);
+    } else if (kind === 'cross') {
+      // A tee forged this, so it fires like two stripes at once: four beams
+      // out of one cell, then a ring to tie them together as a single event
+      // rather than as two effects that happened to coincide.
+      FX.stripeBeam(this.ps, px, py, true, color, cell, span * cell * 0.5);
+      FX.stripeBeam(this.ps, px, py, false, color, cell, span * cell * 0.5);
+      FX.crossCore(this.ps, px, py, color, cell);
+      this.shake.add(0.38);
+      this.shake.flash(light, 0.16);
+      this.shake.stop(0.035);
+      sfx.cross();
+      buzz([0, 22]);
+    } else if (kind === 'nova') {
+      FX.nova(this.ps, px, py, color, cell);
+      this.shake.add(0.56);
+      this.shake.flash('#fff0c2', 0.26);
+      this.shake.stop(0.07);
+      sfx.nova();
+      buzz([0, 34, 20, 30]);
     } else if (kind === 'wrapped') {
       FX.explosion(this.ps, px, py, color, cell * (span >= 5 ? 1.5 : 1));
       this.shake.add(span >= 5 ? 0.48 : 0.34);
@@ -470,10 +489,17 @@ export class Game {
       thickness: cell * 0.1,
     });
     this.shake.flash('#ffffff', isBomb ? 0.2 : 0.1);
-    const label = isBomb ? 'COLOR BOMB' : special === 'wrapped' ? 'WRAPPED' : 'STRIPED';
-    this.floaters.add(label, px, py - cell * 0.6, {
+    const LABELS: Record<string, string> = {
+      bomb: 'COLOR BOMB',
+      nova: 'NOVA',
+      cross: 'CROSS',
+      wrapped: 'WRAPPED',
+      stripeH: 'STRIPED',
+      stripeV: 'STRIPED',
+    };
+    this.floaters.add(LABELS[special] ?? 'SPECIAL', px, py - cell * 0.6, {
       size: cell * 0.3,
-      color: isBomb ? '#ffe03d' : '#9ee7ff',
+      color: isBomb ? '#ffe03d' : special === 'nova' ? '#ffd27a' : '#9ee7ff',
       life: 0.85,
     });
   }
@@ -726,6 +752,8 @@ export class Game {
       if (prev && Math.abs(prev.col - c.col) + Math.abs(prev.row - c.row) === 1) {
         this.commitSwipe(prev, c);
         this.selected = null;
+      } else if (this.tryTapFire(c)) {
+        this.selected = null;
       } else if (prev && prev.col === c.col && prev.row === c.row) {
         this.selected = null;
       } else {
@@ -749,6 +777,52 @@ export class Game {
       }
     }
     this.dragFrom = null;
+  }
+
+  /**
+   * Tapping a special sets it off where it stands.
+   *
+   * The ordering above matters. An adjacent selection is handled first, so
+   * tapping a special while a neighbour is selected still *swaps* — that is
+   * how special-on-special combos are built by tap, and quietly losing them
+   * would be a much worse trade than the convenience is worth. Only an
+   * unpaired tap fires.
+   *
+   * It costs a move, which `Board.activateAt` charges. A free detonation
+   * would strictly dominate swapping the same piece, and the levels are
+   * tuned against a move budget that would stop meaning anything.
+   */
+  private tryTapFire(c: { col: number; row: number }): boolean {
+    if (this.board.busy) return false;
+    const t = this.board.at(c.col, c.row);
+    if (!t || t.special === 'none') return false;
+
+    const [px, py] = this.cellToPx(c.col, c.row);
+    const cell = this.L.cell;
+    const [, light, , spark] = paletteOf(t.color);
+
+    // A quick inward suck before it goes, so a tapped special reads as
+    // *deliberately* triggered rather than as one that happened to be caught
+    // in a match this frame.
+    this.ps.emit({
+      x: px,
+      y: py,
+      count: 14,
+      spread: cell * 1.5,
+      speed: [-320, -140],
+      life: [0.16, 0.28],
+      size: [cell * 0.05, cell * 0.11],
+      sizeEnd: 0,
+      drag: 0.4,
+      colors: [spark, light],
+      shape: 'spark',
+      additive: true,
+    });
+    this.shake.add(0.12);
+    sfx.ui();
+    buzz(12);
+
+    return this.board.activateAt(c.col, c.row);
   }
 
   private pointerCancel(): void {
@@ -1258,7 +1332,7 @@ export class Game {
     if (b.icon) {
       ctx.save();
       ctx.translate(b.x + b.w / 2, y + b.h / 2);
-      drawIcon(ctx, b.icon, b.h * 0.52, '#fff');
+      drawIcon(ctx, b.icon, b.h * 0.52);
       ctx.restore();
     }
     ctx.restore();
@@ -1320,7 +1394,7 @@ export class Game {
 
     ctx.save();
     ctx.translate(cx, cy);
-    drawIcon(ctx, b.icon ?? 'bulb', b.w * 0.52, '#fff');
+    drawIcon(ctx, b.icon ?? 'bulb', b.w * 0.52);
     ctx.restore();
 
     drawBadge(ctx, cx + b.w * 0.36, y + b.h * 0.1, Math.max(8, b.w * 0.19), b.charges ?? 0);
@@ -1535,6 +1609,8 @@ export class Game {
     this.board.setSpecial(1, 5, 'stripeH');
     this.board.setSpecial(3, 2, 'stripeV');
     this.board.setSpecial(5, 5, 'wrapped');
+    this.board.setSpecial(1, 2, 'cross');
+    this.board.setSpecial(4, 7, 'nova');
     this.board.setSpecial(6, 2, 'bomb');
   }
 

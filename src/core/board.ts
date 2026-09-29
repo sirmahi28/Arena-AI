@@ -7,7 +7,7 @@ import {
 } from './types';
 import { clamp, easeInCubic, easeOutBack, easeOutCubic, randInt } from './rng';
 
-export type FireKind = 'stripeH' | 'stripeV' | 'wrapped' | 'bomb';
+export type FireKind = 'stripeH' | 'stripeV' | 'wrapped' | 'cross' | 'nova' | 'bomb';
 
 export interface BoardHooks {
   /** A tile reached the peak of its pop animation — spawn the burst. */
@@ -45,7 +45,57 @@ const IMPULSE_PUSH = 3.2; // cells/s of initial velocity at distance 1
 const IMPULSE_K = 260; // spring stiffness
 const IMPULSE_DAMP = 13; // damping
 
-type Phase = 'idle' | 'swapping' | 'rejecting' | 'clearing' | 'falling' | 'shuffling' | 'locked';
+type Phase =
+  | 'idle'
+  | 'swapping'
+  | 'rejecting'
+  | 'zapping'
+  | 'clearing'
+  | 'falling'
+  | 'shuffling'
+  | 'locked';
+
+/** One colour-bomb bolt, fired on a stagger during the `zapping` phase. */
+interface Zap {
+  fromCol: number;
+  fromRow: number;
+  to: number;
+  color: ColorId;
+}
+
+/**
+ * How long each bolt waits behind the one before it, and how long the board
+ * holds after the last one lands before everything goes off together.
+ *
+ * The whole sequence has to stay under about a fifth of a second. Any longer
+ * and it stops reading as one event and starts feeling like the game has
+ * taken the turn away from you.
+ */
+const ZAP_STAGGER = 0.016;
+const ZAP_HOLD = 0.1;
+const ZAP_MAX_TOTAL = 0.34;
+
+/**
+ * The geometry of a match, which decides what it forges.
+ *
+ * `line`   — a plain run of 3, 4 or 5+.
+ * `square` — the group contains a 2x2 block of one colour.
+ * `L`      — two runs crossing at the end of both: a corner.
+ * `T`      — crossing at the middle of one run and the end of the other.
+ * `plus`   — crossing at the middle of both.
+ */
+export type MatchShape = 'line' | 'square' | 'L' | 'T' | 'plus';
+
+interface Run {
+  cells: number[];
+  horizontal: boolean;
+  /** Row for a horizontal run, column for a vertical one. */
+  line: number;
+  /** First and last index along the run's axis, inclusive. */
+  from: number;
+  to: number;
+  color: ColorId;
+}
 
 interface MatchGroup {
   cells: number[];
@@ -54,6 +104,7 @@ interface MatchGroup {
   maxV: number;
   /** Cell where a forged special should appear. */
   anchor: number;
+  shape: MatchShape;
 }
 
 export class Board {
@@ -78,6 +129,11 @@ export class Board {
   private clearT = 0;
   private clearing: Tile[] = [];
   private pendingForge: Array<{ cell: number; color: ColorId; special: Special }> = [];
+  private zapQueue: Zap[] = [];
+  private zapCursor = 0;
+  private zapT = 0;
+  private zapStep = ZAP_STAGGER;
+  private pendingMarked: Set<number> | null = null;
   private cascadePoints = 0;
   private cascadeCleared = 0;
   private cascadeCx = 0;
@@ -181,6 +237,10 @@ export class Board {
     this.tiles = new Array(this.cols * this.rows).fill(null);
     this.cascade = 0;
     this.movesUsed = 0;
+    this.zapQueue = [];
+    this.pendingMarked = null;
+    this.zapCursor = 0;
+    this.zapT = 0;
     this.phase = 'idle';
     this.clearing = [];
     this.pendingForge = [];
@@ -290,6 +350,10 @@ export class Board {
       case 'swapping':
       case 'rejecting':
         this.updateSwap(dt);
+        break;
+
+      case 'zapping':
+        this.updateZapping(dt);
         break;
 
       case 'clearing':
@@ -426,7 +490,7 @@ export class Board {
 
   private findMatches(): MatchGroup[] {
     const { cols, rows } = this;
-    const runs: number[][] = [];
+    const runs: Run[] = [];
 
     // horizontal
     for (let r = 0; r < rows; r++) {
@@ -439,9 +503,16 @@ export class Board {
         if (!same) {
           const len = c - start;
           if (len >= 3) {
-            const run: number[] = [];
-            for (let k = start; k < c; k++) run.push(idx(k, r, cols));
-            runs.push(run);
+            const cells: number[] = [];
+            for (let k = start; k < c; k++) cells.push(idx(k, r, cols));
+            runs.push({
+              cells,
+              horizontal: true,
+              line: r,
+              from: start,
+              to: c - 1,
+              color: this.at(start, r)!.color,
+            });
           }
           start = c;
         }
@@ -459,9 +530,16 @@ export class Board {
         if (!same) {
           const len = r - start;
           if (len >= 3) {
-            const run: number[] = [];
-            for (let k = start; k < r; k++) run.push(idx(c, k, cols));
-            runs.push(run);
+            const cells: number[] = [];
+            for (let k = start; k < r; k++) cells.push(idx(c, k, cols));
+            runs.push({
+              cells,
+              horizontal: false,
+              line: c,
+              from: start,
+              to: r - 1,
+              color: this.at(c, start)!.color,
+            });
           }
           start = r;
         }
@@ -470,7 +548,6 @@ export class Board {
 
     if (runs.length === 0) return [];
 
-    // Merge runs that share a cell (L / T shapes).
     const parent = new Map<number, number>();
     const find = (x: number): number => {
       let p = parent.get(x) ?? x;
@@ -486,11 +563,31 @@ export class Board {
       if (rx !== ry) parent.set(rx, ry);
     };
 
+    /*
+     * Two runs belong to the same match if they touch — the classic L and T
+     * case, where they share a cell.
+     *
+     * They also belong together if they are parallel, one line apart, the
+     * same colour, and overlap by two or more. That is a 2x2 block of one
+     * colour, which no amount of single-axis scanning will ever notice
+     * because neither run contains a cell of the other. Merging them is what
+     * makes a square pattern detectable at all, and it costs nothing: any
+     * arrangement it merges was already going to clear this turn, so no
+     * previously-legal move changes meaning.
+     */
+    const cellSetOf = (r: Run) => r.cells;
     runs.forEach((run, i) => {
       if (!parent.has(i)) parent.set(i, i);
       for (let j = i + 1; j < runs.length; j++) {
         if (!parent.has(j)) parent.set(j, j);
-        if (run.some((c) => runs[j].includes(c))) union(i, j);
+        const other = runs[j];
+        const shares = cellSetOf(run).some((c) => other.cells.includes(c));
+        const parallelBlock =
+          run.horizontal === other.horizontal &&
+          run.color === other.color &&
+          Math.abs(run.line - other.line) === 1 &&
+          Math.min(run.to, other.to) - Math.max(run.from, other.from) + 1 >= 2;
+        if (shares || parallelBlock) union(i, j);
       }
     });
 
@@ -512,10 +609,9 @@ export class Board {
 
       for (const ri of runIdxs) {
         const run = runs[ri];
-        const horizontal = run.length > 1 && run[1] - run[0] === 1;
-        if (horizontal) maxH = Math.max(maxH, run.length);
-        else maxV = Math.max(maxV, run.length);
-        for (const c of run) {
+        if (run.horizontal) maxH = Math.max(maxH, run.cells.length);
+        else maxV = Math.max(maxV, run.cells.length);
+        for (const c of run.cells) {
           cellSet.add(c);
           const n = (counts.get(c) ?? 0) + 1;
           counts.set(c, n);
@@ -526,15 +622,62 @@ export class Board {
       const cells = [...cellSet];
       const first = this.tiles[cells[0]];
       if (!first) continue;
+
       groups.push({
         cells,
         color: first.color,
         maxH,
         maxV,
         anchor: intersection >= 0 ? intersection : cells[Math.floor(cells.length / 2)],
+        shape: this.classify(runIdxs.map((i) => runs[i]), cellSet, maxH, maxV, intersection),
       });
     }
     return groups;
+  }
+
+  /**
+   * Works out which shape a merged group is, which is what decides the
+   * special it forges.
+   *
+   * The discriminator for L versus T versus plus is simply where the two
+   * runs cross. If the crossing cell sits at an end of both runs it is a
+   * corner; at the middle of one it is a tee; at the middle of both it is a
+   * plus. Three shapes, one comparison each, no pattern templates to
+   * maintain.
+   */
+  private classify(
+    groupRuns: Run[],
+    cellSet: Set<number>,
+    maxH: number,
+    maxV: number,
+    intersection: number,
+  ): MatchShape {
+    const { cols } = this;
+
+    // A straight 5 outranks everything; it is the colour bomb.
+    if (maxH >= 5 || maxV >= 5) return 'line';
+
+    if (maxH >= 3 && maxV >= 3 && intersection >= 0) {
+      const ic = intersection % cols;
+      const ir = Math.floor(intersection / cols);
+      const h = groupRuns.find((r) => r.horizontal && r.line === ir && ic >= r.from && ic <= r.to);
+      const v = groupRuns.find((r) => !r.horizontal && r.line === ic && ir >= r.from && ir <= r.to);
+      if (h && v) {
+        const hMid = ic > h.from && ic < h.to;
+        const vMid = ir > v.from && ir < v.to;
+        if (hMid && vMid) return 'plus';
+        if (hMid || vMid) return 'T';
+        return 'L';
+      }
+    }
+
+    // 2x2 block anywhere inside the group.
+    for (const c of cellSet) {
+      if (c % cols === cols - 1) continue;
+      if (cellSet.has(c + 1) && cellSet.has(c + cols) && cellSet.has(c + cols + 1)) return 'square';
+    }
+
+    return 'line';
   }
 
   private hasMatchAt(col: number, row: number): boolean {
@@ -587,9 +730,20 @@ export class Board {
 
     for (const g of groups) {
       const size = g.cells.length;
+      /*
+       * The forging table. Shape first, then length — a plus built out of
+       * two threes is a harder thing to engineer than a straight four, so it
+       * has to pay better, or the player learns to ignore shapes entirely.
+       *
+       * A straight five still outranks everything: the colour bomb stays the
+       * top of the ladder.
+       */
       let special: Special = 'none';
       if (g.maxH >= 5 || g.maxV >= 5) special = 'bomb';
-      else if (g.maxH >= 3 && g.maxV >= 3) special = 'wrapped';
+      else if (g.shape === 'plus') special = 'nova';
+      else if (g.shape === 'T') special = 'cross';
+      else if (g.shape === 'L') special = 'wrapped';
+      else if (g.shape === 'square') special = 'wrapped';
       else if (g.maxH === 4) special = 'stripeH';
       else if (g.maxV === 4) special = 'stripeV';
 
@@ -633,8 +787,62 @@ export class Board {
       }
     }
 
+    /*
+     * A colour bomb used to delete its targets on the same frame it fired,
+     * which is the least satisfying way to spend the best piece in the game:
+     * a third of the board simply vanished. The bolts now go out first, one
+     * per target on a tight stagger, and the targets all detonate together
+     * once the last bolt lands.
+     *
+     * Nothing about *what* gets cleared changes — `marked` is already
+     * final here. This only delays the visual, which keeps the rule simple
+     * and means no cascade or scoring path had to learn a new shape.
+     */
+    if (this.zapQueue.length > 0) {
+      this.pendingMarked = marked;
+      this.zapCursor = 0;
+      this.zapT = 0;
+      // Big clears would otherwise run long, so the stagger tightens to keep
+      // the whole sequence inside its budget however many targets there are.
+      this.zapStep = Math.min(ZAP_STAGGER, ZAP_MAX_TOTAL / Math.max(1, this.zapQueue.length));
+      this.phase = 'zapping';
+      return;
+    }
+
+    this.commitClear(marked);
+  }
+
+  private updateZapping(dt: number): void {
+    this.zapT += dt;
+    while (
+      this.zapCursor < this.zapQueue.length &&
+      this.zapT >= this.zapCursor * this.zapStep
+    ) {
+      const z = this.zapQueue[this.zapCursor++];
+      const t = this.tiles[z.to];
+      if (!t) continue;
+      this.hooks.onTracer(z.fromCol, z.fromRow, t.col, t.row, z.color);
+      // The target lights up as the bolt reaches it, so by the time the
+      // burst goes off the player can already see everything it caught.
+      t.glow = Math.max(t.glow, 0.9);
+      t.squash = Math.max(t.squash, 0.22);
+    }
+
+    const done = this.zapQueue.length * this.zapStep + ZAP_HOLD;
+    if (this.zapCursor >= this.zapQueue.length && this.zapT >= done) {
+      const marked = this.pendingMarked ?? new Set<number>();
+      this.pendingMarked = null;
+      this.zapQueue = [];
+      this.commitClear(marked);
+    }
+  }
+
+  /** Puts every marked tile into its pop animation and starts the clock. */
+  private commitClear(marked: Set<number>): void {
+    this.zapQueue = [];
     this.clearing = [];
     let cx = 0;
+
     let cy = 0;
     let n = 0;
     for (const cell of marked) {
@@ -643,6 +851,7 @@ export class Board {
       t.state = 'clearing';
       t.clearT = 0;
       t.burst = false;
+      t.rot = 0;
       this.clearing.push(t);
       cx += t.col;
       cy += t.row;
@@ -678,6 +887,22 @@ export class Board {
         for (let c = t.col - 1; c <= t.col + 1; c++)
           if (c >= 0 && r >= 0 && c < cols && r < rows) out.push(idx(c, r, cols));
       this.hooks.onFire('wrapped', t.col, t.row, t.color, 3);
+    } else if (t.special === 'cross') {
+      // Forged by a tee. Takes the whole row *and* the whole column.
+      for (let c = 0; c < cols; c++) out.push(idx(c, t.row, cols));
+      for (let r = 0; r < rows; r++) out.push(idx(t.col, r, cols));
+      this.hooks.onFire('cross', t.col, t.row, t.color, Math.max(cols, rows));
+    } else if (t.special === 'nova') {
+      // Forged by a plus. A 5x5 with the corners cut, so the blast reads as
+      // a burst rather than as a rectangle stamped on the board.
+      for (let r = t.row - 2; r <= t.row + 2; r++) {
+        for (let c = t.col - 2; c <= t.col + 2; c++) {
+          if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+          if (Math.abs(c - t.col) === 2 && Math.abs(r - t.row) === 2) continue;
+          out.push(idx(c, r, cols));
+        }
+      }
+      this.hooks.onFire('nova', t.col, t.row, t.color, 5);
     } else if (t.special === 'bomb') {
       // Caught in a chain: vaporise the most common colour on the board.
       const tally = new Map<ColorId, number>();
@@ -692,7 +917,7 @@ export class Board {
         const o = this.tiles[i];
         if (o && o.color === best) {
           out.push(i);
-          this.hooks.onTracer(t.col, t.row, o.col, o.row, best);
+          this.zapQueue.push({ fromCol: t.col, fromRow: t.row, to: i, color: best });
         }
       }
       this.hooks.onFire('bomb', t.col, t.row, best, 0);
@@ -709,7 +934,17 @@ export class Board {
     };
     const sa = a.special;
     const sb = b.special;
-    const stripe = (s: Special) => s === 'stripeH' || s === 'stripeV';
+    /*
+     * The two new specials slot into the existing combo table rather than
+     * doubling its size. A cross is a line special that happens to point
+     * both ways, and a nova is an area special that happens to be bigger,
+     * so every pairing that already worked keeps working and only the reach
+     * changes. Sixteen new branches would have been sixteen new ways to be
+     * subtly wrong.
+     */
+    const stripe = (s: Special) => s === 'stripeH' || s === 'stripeV' || s === 'cross';
+    const area = (s: Special) => s === 'wrapped' || s === 'nova';
+    const big = sa === 'nova' || sb === 'nova' ? 2 : 1;
 
     // Bomb + bomb: wipe the board.
     if (sa === 'bomb' && sb === 'bomb') {
@@ -733,15 +968,15 @@ export class Board {
         const t = this.tiles[i];
         if (!t) continue;
         if (t.color === targetColor || t === other) {
+          this.zapQueue.push({ fromCol: bomb.col, fromRow: bomb.row, to: i, color: targetColor });
           if (stripe(partner) && upgraded < 12 && t !== other) {
-            t.special = upgraded % 2 === 0 ? 'stripeH' : 'stripeV';
+            t.special = partner === 'cross' ? 'cross' : upgraded % 2 === 0 ? 'stripeH' : 'stripeV';
             upgraded++;
-          } else if (partner === 'wrapped' && upgraded < 6 && t !== other) {
-            t.special = 'wrapped';
+          } else if (area(partner) && upgraded < 6 && t !== other) {
+            t.special = partner;
             upgraded++;
           }
           seeds.add(i);
-          this.hooks.onTracer(bomb.col, bomb.row, t.col, t.row, targetColor);
         }
       }
       seeds.add(idx(bomb.col, bomb.row, cols));
@@ -759,28 +994,30 @@ export class Board {
       return seeds;
     }
 
-    // Striped + wrapped: three rows and three columns.
-    if ((stripe(sa) && sb === 'wrapped') || (sa === 'wrapped' && stripe(sb))) {
+    // Line + area: a band of rows and columns, wider if a nova is involved.
+    if ((stripe(sa) && area(sb)) || (area(sa) && stripe(sb))) {
       a.fired = b.fired = true;
-      const p = sa === 'wrapped' ? a : b;
-      for (let d = -1; d <= 1; d++) {
+      const p = area(sa) ? a : b;
+      const w = big; // 1 -> three lines each way, 2 -> five
+      for (let d = -w; d <= w; d++) {
         for (let c = 0; c < cols; c++) add(c, p.row + d);
         for (let r = 0; r < rows; r++) add(p.col + d, r);
       }
-      this.hooks.onFire('wrapped', p.col, p.row, p.color, 3);
-      for (let d = -1; d <= 1; d++) {
+      this.hooks.onFire(p.special === 'nova' ? 'nova' : 'wrapped', p.col, p.row, p.color, 3);
+      for (let d = -w; d <= w; d++) {
         this.hooks.onFire('stripeH', p.col, p.row + d, p.color, cols);
         this.hooks.onFire('stripeV', p.col + d, p.row, p.color, rows);
       }
       return seeds;
     }
 
-    // Wrapped + wrapped: giant 5x5 blast.
-    if (sa === 'wrapped' && sb === 'wrapped') {
+    // Area + area: one giant blast, 5x5 or 7x7.
+    if (area(sa) && area(sb)) {
       a.fired = b.fired = true;
-      for (let r = b.row - 2; r <= b.row + 2; r++)
-        for (let c = b.col - 2; c <= b.col + 2; c++) add(c, r);
-      this.hooks.onFire('wrapped', b.col, b.row, b.color, 5);
+      const rad = big + 1;
+      for (let r = b.row - rad; r <= b.row + rad; r++)
+        for (let c = b.col - rad; c <= b.col + rad; c++) add(c, r);
+      this.hooks.onFire(big > 1 ? 'nova' : 'wrapped', b.col, b.row, b.color, rad * 2 + 1);
       return seeds;
     }
 
@@ -793,14 +1030,43 @@ export class Board {
 
     for (const t of this.clearing) {
       t.clearT = p;
-      // Inflate, then implode.
-      t.scale = p < 0.42 ? 1 + easeOutBack(p / 0.42, 3.2) * 0.42 : 1.42 * (1 - easeInCubic((p - 0.42) / 0.58));
-      t.rot += dt * 7 * (t.id % 2 === 0 ? 1 : -1);
-      t.glow = Math.min(1, p * 2.2);
+      /*
+       * The pop used to spin the candy as it went. Spin is the cheapest
+       * possible way to signal "something is happening", and it fights the
+       * art: these pieces have a fixed light source and a painted highlight,
+       * so rotating them makes the highlight swim and the candy read as a
+       * flat sticker being twirled.
+       *
+       * The shape does the work instead. A quick anticipatory squat, then an
+       * overshooting inflate, then a fast implode — with the squash axis
+       * flipping between the two halves so the candy visibly *stretches*
+       * before it goes. Same three frames of information, no spin.
+       */
+      if (p < 0.18) {
+        const u = p / 0.18;
+        t.scale = 1 - 0.1 * Math.sin(u * Math.PI * 0.5);
+        t.squash = 0.16 * u; // squat: wide and low
+      } else if (p < 0.46) {
+        const u = (p - 0.18) / 0.28;
+        t.scale = 0.9 + easeOutBack(u, 3.4) * 0.56;
+        t.squash = 0.16 - 0.34 * u; // snap through to tall and narrow
+      } else {
+        const u = (p - 0.46) / 0.54;
+        t.scale = 1.46 * (1 - easeInCubic(u));
+        t.squash = -0.18 * (1 - u);
+      }
+      t.glow = Math.min(1, p * 2.4);
       if (!t.burst && p >= 0.45) {
         t.burst = true;
         // Shove the surrounding candies away from the blast.
-        const power = t.special === 'none' ? 1 : t.special === 'wrapped' || t.special === 'bomb' ? 3 : 2;
+        const power =
+          t.special === 'none'
+            ? 1
+            : t.special === 'nova' || t.special === 'bomb'
+              ? 3.6
+              : t.special === 'wrapped' || t.special === 'cross'
+                ? 3
+                : 2;
         this.impulseAt(t.col, t.row, power);
         this.hooks.onPop(t, this.cascade);
       }
@@ -998,11 +1264,18 @@ export class Board {
    * Set off the special candy in a cell without needing a match.
    * Powers booster items (and the visual test harness).
    */
+  /**
+   * Fire a special in place, without swapping it. Costs a move, exactly as a
+   * swap would: a special you already own should not be free to set off, or
+   * tapping strictly dominates swapping and the move economy the levels are
+   * tuned against quietly stops meaning anything.
+   */
   activateAt(col: number, row: number): boolean {
     if (this.phase !== 'idle') return false;
     const t = this.at(col, row);
     if (!t || t.special === 'none') return false;
     this.cascade = 0;
+    this.movesUsed++;
     this.beginClear(new Set([idx(col, row, this.cols)]));
     return true;
   }

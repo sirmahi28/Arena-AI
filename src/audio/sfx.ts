@@ -147,6 +147,33 @@ export class Sfx {
     this.noise(0.4, { gain: 0.3, from: 3200, to: 110, q: 0.5 });
   }
 
+  /**
+   * Cross: two stripes firing at once, so it is the stripe sound doubled at
+   * an interval rather than played twice. Two copies of one sample landing
+   * on the same frame just sounds louder; a fifth apart sounds like a
+   * bigger, different event.
+   */
+  cross(): void {
+    this.tone(1600, 0.32, { type: 'sawtooth', gain: 0.09, slideTo: 300 });
+    this.tone(1067, 0.32, { type: 'sawtooth', gain: 0.07, slideTo: 200, delay: 0.02 });
+    this.noise(0.36, { gain: 0.2, from: 8000, to: 480, q: 0.6 });
+    this.tone(180, 0.28, { type: 'sine', gain: 0.22, slideTo: 70 });
+  }
+
+  /** Nova: the boom, with a rising tail so it lands as an upgrade of it. */
+  nova(): void {
+    this.tone(140, 0.5, { type: 'sine', gain: 0.4, slideTo: 38 });
+    this.tone(85, 0.55, { type: 'triangle', gain: 0.3, slideTo: 28 });
+    this.noise(0.46, { gain: 0.3, from: 4200, to: 100, q: 0.5 });
+    for (let i = 0; i < 4; i++) {
+      this.tone(523 * Math.pow(2, NOTES[i] / 12), 0.3, {
+        type: 'triangle',
+        gain: 0.1,
+        delay: 0.05 + i * 0.035,
+      });
+    }
+  }
+
   rainbow(): void {
     for (let i = 0; i < 8; i++) {
       this.tone(392 * Math.pow(2, NOTES[i] / 12), 0.28, {

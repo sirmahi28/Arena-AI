@@ -113,6 +113,26 @@ export function drawStar(
 }
 
 /** Big candy-coloured button with a 3D lip. */
+/**
+ * A pressable button with real depth.
+ *
+ * The earlier version was a gradient rectangle with a gloss strip, which is
+ * the house style of every flat UI kit and reads as a web form control
+ * dropped into a game. Four things separate that from a moulded plastic
+ * button, and all of them are cheap:
+ *
+ *  - a *deep* lip in a darker shade of the face colour, not a grey drop
+ *    shadow, so the side wall looks like the same material;
+ *  - a dark outer keyline, which is what stops the button dissolving into a
+ *    busy background;
+ *  - bounce light along the bottom inside edge, where a real moulded surface
+ *    catches light reflected back up off the lip;
+ *  - a specular sheen that is an arc rather than a rectangle, because a
+ *    straight-edged highlight is the single clearest tell of a flat shape.
+ *
+ * Pressing sinks the face into the lip rather than moving the whole button,
+ * so the travel is visible against a fixed silhouette.
+ */
 export function drawButton(
   ctx: CanvasRenderingContext2D,
   b: HudButton,
@@ -121,42 +141,71 @@ export function drawButton(
   iconSize = 0,
 ): void {
   const press = b.pressed;
-  const lift = 5 * (1 - press);
-  const y = b.y + press * 4;
+  const depth = b.h * 0.13;
+  const lift = depth * (1 - press);
+  const y = b.y + depth - lift;
+  const rad = b.round ? b.h / 2 : b.h * 0.3;
+
   ctx.save();
-  // Lip / shadow
-  roundRectPath(ctx, b.x, y + lift, b.w, b.h, b.round ? b.h / 2 : b.h * 0.32);
+
+  // Outer keyline + lip, drawn as one taller shape behind the face.
+  roundRectPath(ctx, b.x, b.y, b.w, b.h + depth, rad);
+  ctx.fillStyle = 'rgba(18,7,34,0.55)';
+  ctx.fill();
+  roundRectPath(ctx, b.x + 1, b.y + 1, b.w - 2, b.h + depth - 2, rad);
   ctx.fillStyle = colors[2];
   ctx.fill();
-  // Face
+
+  // Face.
   const g = ctx.createLinearGradient(0, y, 0, y + b.h);
   g.addColorStop(0, colors[0]);
-  g.addColorStop(1, colors[1]);
-  roundRectPath(ctx, b.x, y, b.w, b.h, b.round ? b.h / 2 : b.h * 0.32);
+  g.addColorStop(0.55, colors[1]);
+  g.addColorStop(1, shadeHex(colors[1], 0.86));
+  roundRectPath(ctx, b.x + 1.5, y, b.w - 3, b.h, rad);
   ctx.fillStyle = g;
   ctx.fill();
-  // Gloss
+
   ctx.save();
   ctx.clip();
-  const gl = ctx.createLinearGradient(0, y, 0, y + b.h * 0.55);
-  gl.addColorStop(0, 'rgba(255,255,255,0.45)');
-  gl.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = gl;
-  ctx.fillRect(b.x, y, b.w, b.h * 0.55);
+
+  // Specular sheen: a wide flattened arc across the top third.
+  ctx.beginPath();
+  ctx.ellipse(
+    b.x + b.w / 2,
+    y - b.h * 0.42,
+    b.w * 0.46,
+    b.h * 0.62,
+    0,
+    0,
+    Math.PI * 2,
+  );
+  const sheen = ctx.createLinearGradient(0, y, 0, y + b.h * 0.6);
+  sheen.addColorStop(0, 'rgba(255,255,255,0.5)');
+  sheen.addColorStop(1, 'rgba(255,255,255,0.06)');
+  ctx.fillStyle = sheen;
+  ctx.fill();
+
+  // Bounce light off the lip, along the bottom inside edge.
+  const bounce = ctx.createLinearGradient(0, y + b.h, 0, y + b.h * 0.68);
+  bounce.addColorStop(0, 'rgba(255,255,255,0.3)');
+  bounce.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = bounce;
+  ctx.fillRect(b.x, y + b.h * 0.68, b.w, b.h * 0.32);
   ctx.restore();
 
-  ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-  ctx.lineWidth = 1.5;
-  roundRectPath(ctx, b.x, y, b.w, b.h, b.round ? b.h / 2 : b.h * 0.32);
+  // Rim light along the very top.
+  roundRectPath(ctx, b.x + 1.5, y, b.w - 3, b.h, rad);
+  ctx.strokeStyle = 'rgba(255,255,255,0.45)';
+  ctx.lineWidth = 1.4;
   ctx.stroke();
 
   const cx = b.x + b.w / 2;
-  const cy = y + b.h / 2 + 1;
+  const cy = y + b.h / 2;
 
   if (b.icon && iconSize > 0 && !b.label) {
     ctx.save();
     ctx.translate(cx, cy);
-    drawIcon(ctx, b.icon, iconSize, '#fff');
+    drawIcon(ctx, b.icon, iconSize);
     ctx.restore();
   } else if (b.icon && iconSize > 0) {
     const gap = iconSize * 0.42;
@@ -165,7 +214,7 @@ export function drawButton(
     const total = iconSize + gap + tw;
     ctx.save();
     ctx.translate(cx - total / 2 + iconSize / 2, cy);
-    drawIcon(ctx, b.icon, iconSize, '#fff');
+    drawIcon(ctx, b.icon, iconSize);
     ctx.restore();
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
@@ -178,13 +227,25 @@ export function drawButton(
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = FONT(fontSize, 900);
-    ctx.lineWidth = Math.max(2, fontSize * 0.16);
-    ctx.strokeStyle = 'rgba(70,20,10,0.4)';
+    ctx.lineWidth = Math.max(2, fontSize * 0.18);
+    ctx.strokeStyle = 'rgba(52,14,8,0.5)';
     ctx.strokeText(b.label, cx, cy);
-    ctx.fillStyle = '#fff';
+    const tg = ctx.createLinearGradient(0, cy - fontSize * 0.6, 0, cy + fontSize * 0.6);
+    tg.addColorStop(0, '#ffffff');
+    tg.addColorStop(1, '#ffe4f2');
+    ctx.fillStyle = tg;
     ctx.fillText(b.label, cx, cy);
   }
   ctx.restore();
+}
+
+/** Multiply a hex colour toward black, for deriving a button's lower face. */
+function shadeHex(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * k);
+  const g = Math.round(((n >> 8) & 255) * k);
+  const b = Math.round((n & 255) * k);
+  return `rgb(${r},${g},${b})`;
 }
 
 /** Small count bubble in the top-right corner of a booster button. */

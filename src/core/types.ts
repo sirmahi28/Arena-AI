@@ -7,7 +7,22 @@ export const BOMB_COLOR: ColorId = -1;
 
 export const COLOR_COUNT = 6;
 
-export type Special = 'none' | 'stripeH' | 'stripeV' | 'wrapped' | 'bomb';
+/**
+ * Special candies, in ascending power.
+ *
+ * `cross` and `nova` exist because L, T and plus shapes used to forge the
+ * same wrapped candy, which threw away the information the player had just
+ * created. A tee is a harder shape to build than a corner and a plus is
+ * harder still, so each now forges something visibly different.
+ */
+export type Special =
+  | 'none'
+  | 'stripeH'
+  | 'stripeV'
+  | 'wrapped'
+  | 'cross'
+  | 'nova'
+  | 'bomb';
 
 export type TileState = 'idle' | 'falling' | 'swapping' | 'clearing';
 
