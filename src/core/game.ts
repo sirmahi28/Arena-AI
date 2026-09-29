@@ -13,6 +13,7 @@ import {
 } from './game-config';
 import { Background } from '../render/background';
 import { SpriteCache } from '../render/sprites';
+import { BloomPass } from '../render/bloom';
 import { ParticleSystem } from '../fx/particles';
 import { FX } from '../fx/emitters';
 import { Floaters } from '../fx/floaters';
@@ -75,6 +76,7 @@ export class Game {
   private floaters = new Floaters(56);
   private shake = new ScreenShake();
   private sprites = new SpriteCache();
+  private bloom = new BloomPass();
   private banner = new Banner();
   private scoreRoll = new Rolling();
   private movesRoll = new Rolling();
@@ -213,6 +215,7 @@ export class Game {
     this.bg.resize(w, h);
     this.floaters.setBounds(w, h);
     this.sprites.ensure(cell, this.dpr);
+    this.bloom.resize(w, h);
     this.bakeBoardLayer();
     this.layoutButtons();
   }
@@ -854,6 +857,9 @@ export class Game {
       const avg = this.fpsSamples.reduce((a, b) => a + b, 0) / this.fpsSamples.length;
       const target = avg > 0.026 ? 0.55 : avg > 0.021 ? 0.8 : 1;
       this.ps.quality = damp(this.ps.quality, target, 1.5, raw);
+      // Bloom is the most expensive single thing we draw, so it sheds first:
+      // wide halo goes at ~28ms/frame, the whole pass at ~40ms.
+      this.bloom.setTier(avg > 0.04 ? 0 : avg > 0.028 ? 1 : 2);
     }
 
     const dt = this.shake.consume(raw);
@@ -899,17 +905,32 @@ export class Game {
 
     this.bg.render(ctx);
 
+    // The screen-shake transform, replayed into the bloom buffers so the glow
+    // tracks whatever produced it.
+    const worldXform = (c: CanvasRenderingContext2D) => {
+      c.translate(w / 2 + this.shake.x, h / 2 + this.shake.y);
+      c.rotate(this.shake.rot);
+      c.scale(this.shake.zoom, this.shake.zoom);
+      c.translate(-w / 2, -h / 2);
+    };
+
     ctx.save();
-    ctx.translate(w / 2 + this.shake.x, h / 2 + this.shake.y);
-    ctx.rotate(this.shake.rot);
-    ctx.scale(this.shake.zoom, this.shake.zoom);
-    ctx.translate(-w / 2, -h / 2);
+    worldXform(ctx);
 
     this.drawBoard(ctx);
     this.ps.render(ctx);
     this.floaters.render(ctx);
 
     ctx.restore();
+
+    // Bloom: re-draw the emissive parts small, then add them back blurred.
+    if (this.bloom.active) {
+      for (const bctx of this.bloom.begin(worldXform)) {
+        this.ps.renderGlowOnly(bctx);
+        this.drawTileGlow(bctx);
+      }
+      this.bloom.composite(ctx);
+    }
 
     this.drawHud(ctx);
     if (this.phase === 'playing') {
@@ -969,8 +990,19 @@ export class Game {
       // the other, so a shoved candy wobbles like gelatin instead of just
       // sliding. Phase is per-tile so a whole row never pulses in lockstep.
       const jw = t.jelly > 0 ? Math.sin(this.titleT * 26 + t.jellyPhase) * t.jelly * 0.22 : 0;
-      const sx = s * (1 + t.squash * 0.55 + jw);
-      const sy = s * (1 - t.squash * 0.55 - jw);
+
+      // Motion stretch: a candy travelling fast elongates along its direction
+      // of travel. Classic smear animation — it reads as speed far better
+      // than the extra frames it costs (none).
+      const stretch = t.state === 'falling' ? Math.min(0.3, Math.abs(t.vy) * 0.013) : 0;
+
+      // Idle breathing, so a settled board is never completely dead. Tiny on
+      // purpose: you should feel it without being able to point at it.
+      const breathe =
+        t.state === 'idle' && this.phase === 'playing' ? Math.sin(this.titleT * 1.7 + t.jellyPhase) * 0.012 : 0;
+
+      const sx = s * (1 + t.squash * 0.55 + jw - stretch + breathe);
+      const sy = s * (1 - t.squash * 0.55 - jw + stretch + breathe);
 
       const img = this.sprites.get(t.color, t.special);
 
@@ -1005,6 +1037,43 @@ export class Game {
       ctx.restore();
     }
     ctx.restore();
+  }
+
+  /**
+   * Emissive contribution of the candies themselves, for the bloom buffer:
+   * specials hum, and anything mid-pop flares white-hot. Drawn as the cached
+   * sprite at low alpha — cheap, and it picks up the candy's own colour so
+   * the halo is tinted rather than grey.
+   */
+  private drawTileGlow(ctx: CanvasRenderingContext2D): void {
+    const size = this.sprites.drawSize;
+    const half = size / 2;
+    for (const t of this.board.tiles) {
+      if (!t) continue;
+      const special = t.special !== 'none';
+      const flare = t.glow;
+      if (!special && flare <= 0.02) continue;
+
+      const spawn = t.spawnT < 1 ? easeOutBack(t.spawnT, 2.4) : 1;
+      const s = t.scale * spawn;
+      if (s <= 0.01) continue;
+
+      // Specials breathe; popping candies blow out hard.
+      const aura = special ? 0.3 + 0.16 * Math.sin(this.titleT * 4 + t.id) : 0;
+      const a = Math.min(1, aura + flare * 0.9);
+      if (a <= 0.02) continue;
+
+      const [px, py] = this.cellToPx(t.x + t.ox, t.y + t.oy);
+      const img = this.sprites.get(t.color, t.special);
+      const grow = 1 + flare * 0.35;
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(px, py);
+      ctx.scale(s * grow, s * grow);
+      ctx.rotate(t.rot);
+      ctx.drawImage(img, -half, -half, size, size);
+      ctx.restore();
+    }
   }
 
   private drawHud(ctx: CanvasRenderingContext2D): void {

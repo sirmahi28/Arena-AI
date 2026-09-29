@@ -112,6 +112,20 @@ The result is that a match doesn't just delete candies — the whole
 neighbourhood recoils and springs back. Measured cost: **~2 ms/frame** under a
 software rasteriser.
 
+### Light bloom
+
+Everything emissive — additive particles, special-candy auras, anything
+mid-pop — is drawn a second time into two small offscreen buffers (¼ and ⅒
+scale) which are scaled back over the frame with `lighter`. The upscale *is*
+the blur: the browser's bilinear filter does the work for free. Stacking two
+radii, a tight core and a wide halo, is what stops it looking like a uniform
+smear, and a real separable gaussian would cost several full-resolution passes
+to buy very little at these sizes.
+
+It is the most expensive single thing the game draws, so it is the first thing
+to go: the same rolling frame average that scales particle counts drops the
+wide halo at ~28ms/frame and the whole pass at ~40ms. On a GPU it stays on.
+
 ### Candies are lit, not just coloured
 
 The sprite shading is built from the dark end of the ramp rather than by piling
@@ -146,6 +160,12 @@ Measured in the same headless software-rendered environment, that took the frame
 time from **65 ms → ~48 ms** (the harness reports it on every run). On a real
 device with GPU compositing there's a lot more headroom — and the particle system
 still scales its own emission counts down automatically if frames start slipping.
+
+The same discipline paid off again later: adding drifting light rays, twinkling
+stars and a stage-light pool to the background *lowered* the board's frame time
+from 45.4 ms to **40.0 ms**, because the aurora and glow layers they replaced
+were being composited live every frame and are now folded into the baked base.
+Measured with bloom forced on, the full-quality path costs 58.3 ms.
 
 ---
 

@@ -52,8 +52,10 @@ export class Background {
   private h = 0;
 
   private base: HTMLCanvasElement | null = null;
-  private aurora: HTMLCanvasElement | null = null;
   private vignette: HTMLCanvasElement | null = null;
+  private rays: HTMLCanvasElement | null = null;
+  private starTex: HTMLCanvasElement | null = null;
+  private stars: { x: number; y: number; r: number; phase: number; rate: number }[] = [];
 
   resize(w: number, h: number): void {
     this.w = w;
@@ -87,32 +89,99 @@ export class Background {
     base.height = bh;
     const bc = base.getContext('2d')!;
     const g = bc.createLinearGradient(0, 0, 0, bh);
-    g.addColorStop(0, '#2b1155');
-    g.addColorStop(0.45, '#1d0d3c');
-    g.addColorStop(1, '#0f0722');
+    g.addColorStop(0, '#36166b');
+    g.addColorStop(0.3, '#251050');
+    g.addColorStop(0.62, '#180b36');
+    g.addColorStop(1, '#0b0519');
     bc.fillStyle = g;
     bc.fillRect(0, 0, bw, bh);
+    // A cool counter-tint low-left keeps the wash from being one flat hue.
+    const cool = bc.createRadialGradient(bw * 0.15, bh * 0.92, 0, bw * 0.15, bh * 0.92, bw * 0.9);
+    cool.addColorStop(0, 'rgba(24,90,150,0.3)');
+    cool.addColorStop(1, 'rgba(24,90,150,0)');
+    bc.fillStyle = cool;
+    bc.fillRect(0, 0, bw, bh);
+    // Fold the aurora sweep and the stage light straight into the base. Both
+    // are effectively static, and every separate full-screen 'lighter' blend
+    // was costing more than the animation was worth. The rays, stars and
+    // blobs still move, which is plenty of life.
+    bc.save();
+    bc.globalCompositeOperation = 'lighter';
+    const sweepB = bc.createLinearGradient(0, bh * 0.1, bw, bh * 0.9);
+    sweepB.addColorStop(0, 'rgba(255,80,170,0.5)');
+    sweepB.addColorStop(0.5, 'rgba(120,90,255,0.42)');
+    sweepB.addColorStop(1, 'rgba(60,200,255,0.34)');
+    bc.globalAlpha = 0.21;
+    bc.fillStyle = sweepB;
+    bc.fillRect(0, 0, bw, bh);
+
+    bc.globalAlpha = 0.55;
+    const pool = bc.createRadialGradient(bw / 2, bh * 0.46, 0, bw / 2, bh * 0.46, bw * 0.78);
+    pool.addColorStop(0, 'rgba(180,120,255,0.5)');
+    pool.addColorStop(0.45, 'rgba(130,80,220,0.22)');
+    pool.addColorStop(1, 'rgba(90,50,180,0)');
+    bc.fillStyle = pool;
+    bc.fillRect(0, 0, bw, bh);
+    bc.restore();
     this.base = base;
 
-    const aur = document.createElement('canvas');
-    aur.width = bw;
-    aur.height = bh;
-    const ac = aur.getContext('2d')!;
-    const sweep = ac.createLinearGradient(0, bh * 0.1, bw, bh * 0.9);
-    sweep.addColorStop(0, 'rgba(255,80,170,0.5)');
-    sweep.addColorStop(0.5, 'rgba(120,90,255,0.42)');
-    sweep.addColorStop(1, 'rgba(60,200,255,0.34)');
-    ac.fillStyle = sweep;
-    ac.fillRect(0, 0, bw, bh);
-    this.aurora = aur;
+
+    // Light rays: soft diagonal shafts, baked once and panned. Drawn twice at
+    // different speeds and alphas so the motion never looks like a loop.
+    const rw = 256;
+    const rh = 256;
+    const ry = document.createElement('canvas');
+    ry.width = rw;
+    ry.height = rh;
+    const ryc = ry.getContext('2d')!;
+    ryc.translate(rw / 2, rh / 2);
+    ryc.rotate(-0.42);
+    for (let i = 0; i < 9; i++) {
+      const x = -rw * 0.75 + i * (rw * 0.19);
+      const wdt = rw * (0.012 + (i % 3) * 0.016);
+      const lg = ryc.createLinearGradient(x, -rh, x, rh);
+      lg.addColorStop(0, 'rgba(255,225,255,0)');
+      lg.addColorStop(0.45, `rgba(255,220,255,${0.05 + (i % 4) * 0.018})`);
+      lg.addColorStop(1, 'rgba(180,200,255,0)');
+      ryc.fillStyle = lg;
+      ryc.fillRect(x - wdt, -rh, wdt * 2, rh * 2);
+    }
+    this.rays = ry;
+
+    // Twinkle texture: one tiny 4-point sparkle, reused for every star.
+    const st = document.createElement('canvas');
+    st.width = 32;
+    st.height = 32;
+    const stc = st.getContext('2d')!;
+    const sgrad = stc.createRadialGradient(16, 16, 0, 16, 16, 16);
+    sgrad.addColorStop(0, 'rgba(255,255,255,1)');
+    sgrad.addColorStop(0.25, 'rgba(220,225,255,0.5)');
+    sgrad.addColorStop(1, 'rgba(180,200,255,0)');
+    stc.fillStyle = sgrad;
+    stc.fillRect(0, 0, 32, 32);
+    this.starTex = st;
+
+    this.stars = [];
+    const count = Math.round((w * h) / 26000);
+    for (let i = 0; i < count; i++) {
+      this.stars.push({
+        x: rand(0, w),
+        y: rand(0, h),
+        r: rand(0.9, 2.6),
+        phase: rand(0, Math.PI * 2),
+        rate: rand(0.5, 1.9),
+      });
+    }
+
 
     const vig = document.createElement('canvas');
     vig.width = 256;
     vig.height = 256;
     const vc = vig.getContext('2d')!;
-    const v = vc.createRadialGradient(128, 116, 60, 128, 128, 190);
+    const v = vc.createRadialGradient(128, 112, 44, 128, 128, 196);
     v.addColorStop(0, 'rgba(0,0,0,0)');
-    v.addColorStop(1, 'rgba(0,0,0,0.58)');
+    v.addColorStop(0.55, 'rgba(6,2,16,0.2)');
+    v.addColorStop(1, 'rgba(4,1,12,0.72)');
     vc.fillStyle = v;
     vc.fillRect(0, 0, 256, 256);
     this.vignette = vig;
@@ -140,9 +209,27 @@ export class Background {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
 
-    if (this.aurora) {
-      ctx.globalAlpha = 0.16 + 0.1 * Math.sin(this.t * 0.22);
-      ctx.drawImage(this.aurora, 0, 0, w, h);
+    // The aurora sweep and the stage-light pool are pre-composited into the
+    // base layer during bake(). They barely move, and each separate
+    // full-screen 'lighter' blend cost more than the animation was worth.
+
+    // One panning ray layer. A second offset copy read marginally richer and
+    // cost another full-screen blend, so it went.
+    if (this.rays) {
+      const rw = w * 1.9;
+      const rh = h * 1.05;
+      ctx.globalAlpha = 0.6;
+      ctx.drawImage(this.rays, -((this.t * 6) % rw) - w * 0.3, -h * 0.16, rw, rh);
+    }
+
+    // Twinkling stars.
+    if (this.starTex) {
+      for (const st of this.stars) {
+        const tw = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(this.t * st.rate + st.phase));
+        ctx.globalAlpha = tw * 0.75;
+        const rr = st.r * (0.8 + tw * 0.5);
+        ctx.drawImage(this.starTex, st.x - rr, st.y - rr, rr * 2, rr * 2);
+      }
     }
 
     for (const b of this.blobs) {

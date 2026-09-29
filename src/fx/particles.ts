@@ -251,6 +251,14 @@ export class ParticleSystem {
     }
   }
 
+  /**
+   * Draw only the additive particles, for the bloom buffer. The caller has
+   * already set `lighter` and the world transform.
+   */
+  renderGlowOnly(ctx: CanvasRenderingContext2D): void {
+    for (const p of this.pool) if (p.alive && p.additive) this.draw(ctx, p);
+  }
+
   render(ctx: CanvasRenderingContext2D): void {
     // Pass 1: additive bloom
     ctx.save();
