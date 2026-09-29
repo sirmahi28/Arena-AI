@@ -187,6 +187,79 @@ target('candy-atlas.webp', ['art-src/candy-sheet.png', 'art-src/bomb-cell.png'],
  * Printed rather than written, because clobbering a source file from a build
  * script is a nasty surprise. Paste it into src/core/types.ts.
  */
+// ---- UI icon atlas --------------------------------------------------------
+/*
+ * Eight UI icons packed 4x2 at 192px a cell.
+ *
+ * These were hand-shaded vector paths for a long time and it was the right
+ * default — no asset, tintable, scales anywhere. What killed it is the size
+ * they are actually drawn at: 33 CSS pixels. Every technique that makes a
+ * vector glyph read as an object — swept extrusion, upper-left gloss,
+ * ambient occlusion, rim light — lands inside two or three pixels at that
+ * scale and averages back out to a flat coloured shape. Rendering them once
+ * at 192px and downscaling keeps all of it.
+ *
+ * Cell size is generous on purpose: the largest a HUD icon ever gets is
+ * 33 CSS px at dpr 3, so 192 leaves nearly 2x headroom and the whole sheet
+ * still costs less than the logo.
+ *
+ * `REACH_ICON` normalises how much of its cell each icon fills, by its
+ * *longest* side. Without it the play triangle and the light bulb — very
+ * different aspect ratios — end up looking like different point sizes on the
+ * same button row.
+ */
+const ICON_CELL = 192;
+const ICON_COLS = 4;
+const ICON_IDS = [
+  'hammer',
+  'shuffle',
+  'bulb',
+  'restart',
+  'sound-on',
+  'sound-off',
+  'play',
+  'next',
+];
+// Tuned by eye against the rendered footer, not by bounding box: a hollow
+// shape like the restart loop has to run larger than a solid one like the
+// play triangle to carry the same weight.
+const REACH_ICON = [0.94, 0.92, 0.9, 0.94, 0.9, 0.9, 0.82, 0.88];
+
+target('icon-atlas.webp', ['art-src/icons-raw.png'], () => {
+  rmSync(TMP, { recursive: true, force: true });
+  mkdirSync(TMP, { recursive: true });
+
+  convert(['art-src/icons-raw.png', '-crop', '4x2@', '+repage', `${TMP}/i-%d.png`]);
+
+  for (let i = 0; i < ICON_IDS.length; i++) {
+    const side = Math.round(REACH_ICON[i] * ICON_CELL);
+    cutout(`${TMP}/i-${i}.png`, `${TMP}/ic-${i}.png`, [
+      // `>` is deliberately absent: fit the longest side to `side` either
+      // way, so a small render is scaled up to match its neighbours.
+      '-resize', `${side}x${side}`,
+      '-background', 'none',
+      '-gravity', 'center',
+      '-extent', `${ICON_CELL}x${ICON_CELL}`,
+    ]);
+  }
+
+  run('montage', [
+    ...ICON_IDS.map((_, i) => `${TMP}/ic-${i}.png`),
+    '-tile', `${ICON_COLS}x2`,
+    '-geometry', `${ICON_CELL}x${ICON_CELL}+0+0`,
+    '-background', 'none',
+    `${TMP}/icon-atlas.png`,
+  ]);
+
+  convert([
+    `${TMP}/icon-atlas.png`,
+    '-strip',
+    '-quality', '86',
+    '-define', 'webp:alpha-quality=96',
+    `${OUT}/icon-atlas.webp`,
+  ]);
+});
+
 function samplePalette() {
   const names = ['strawberry', 'orange', 'lemon', 'apple', 'blueberry', 'grape'];
   const rgbToHsl = (r, g, b) => {

@@ -17,6 +17,67 @@
  * every icon follows.
  */
 
+import atlasUrl from '../assets/icon-atlas.webp';
+
+/*
+ * The icons ship as artwork now, not as shaded vector paths.
+ *
+ * The vector version below is still here and still runs — it is what draws
+ * the HUD for the ~100ms before the atlas decodes — but it is no longer what
+ * players see, and the reason is worth writing down because the code looked
+ * completely reasonable.
+ *
+ * Every technique that makes a vector glyph read as a solid object needs
+ * pixels to land in: a swept side wall, an upper-left gloss, ambient
+ * occlusion at the bottom, a rim light along the top. Those were all
+ * implemented and all correct. They were also being asked to fit inside a
+ * **33 CSS pixel** icon, where each of them occupies two or three pixels and
+ * averages straight back out into a flat coloured shape. Rendered at 256px
+ * the same code looks genuinely three-dimensional; at the size the game
+ * actually draws it, it looks like a sticker. That gap is the whole lesson —
+ * judge icon shading at the size it ships, never at the size you author it.
+ *
+ * Rendering once at 192px and downscaling keeps all of the shading, costs
+ * 41 KB, and turns out to be *cheaper* per frame than the baked vector path
+ * it replaces: one `drawImage` against a decoded bitmap, no cache at all.
+ */
+let atlas: HTMLImageElement | null = null;
+{
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = atlasUrl;
+  img.onload = () => {
+    atlas = img;
+  };
+}
+
+/** Cell size and grid of `src/assets/icon-atlas.webp`. */
+const ATLAS_CELL = 192;
+const ATLAS_COLS = 4;
+
+/** Atlas cell index per icon, in the order `tools/build-art.mjs` packs them. */
+const ATLAS_INDEX: Record<string, number> = {
+  hammer: 0,
+  shuffle: 1,
+  bulb: 2,
+  restart: 3,
+  'sound-on': 4,
+  'sound-off': 5,
+  play: 6,
+  next: 7,
+};
+
+/**
+ * How much bigger than `s` the atlas cell is blitted.
+ *
+ * Each icon is normalised to ~0.9 of its cell by the build, so blitting the
+ * cell at exactly `s` would render the icon itself at ~0.9s and every button
+ * would quietly lose a tenth of its icon in the switch from vectors. 1.18
+ * lands them a touch *larger* than the old paths, which is what the art is
+ * for.
+ */
+const ATLAS_SCALE = 1.18;
+
 export type IconId =
   | 'sound-on'
   | 'sound-off'
@@ -249,12 +310,38 @@ function bake(id: IconId, s: number, color: string | undefined, dpr: number): HT
   return cv;
 }
 
+/**
+ * Draw an icon centred on the current origin, `s` CSS pixels across.
+ *
+ * `color` only affects the vector fallback; the atlas art carries its own
+ * colour. The parameter stays because callers may still pass one and a
+ * silently-ignored tint is far better than a compile break for a path that
+ * is only live for the first few frames.
+ */
 export function drawIcon(
   ctx: CanvasRenderingContext2D,
   id: IconId,
   s: number,
   color?: string,
 ): void {
+  const cell = ATLAS_INDEX[id];
+  if (atlas && cell !== undefined) {
+    const d = s * ATLAS_SCALE;
+    ctx.drawImage(
+      atlas,
+      (cell % ATLAS_COLS) * ATLAS_CELL,
+      Math.floor(cell / ATLAS_COLS) * ATLAS_CELL,
+      ATLAS_CELL,
+      ATLAS_CELL,
+      -d / 2,
+      -d / 2,
+      d,
+      d,
+    );
+    return;
+  }
+
+  // Fallback: the shaded vector path, baked once per size/tint.
   const dpr = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
   // Quantised so a pixel of layout drift cannot spawn a new bitmap.
   const q = Math.round(s * 2) / 2;
