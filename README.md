@@ -30,6 +30,7 @@ It's built for a phone. On desktop, open devtools and switch to a mobile viewpor
 | `npm test` | Headless rules soak test (1500 simulated moves) |
 | `npm run test:calibrate` | Difficulty simulation across levels |
 | `npm run shots` | Drives the real game in headless Chromium and screenshots it |
+| `npm run setup:chromium` | Fallback browser install, if Playwright's download is blocked |
 
 ---
 
@@ -203,8 +204,25 @@ them, forces each special to detonate, and screenshots the result. It fails the
 run on any console error, uncaught exception or failed request, checks the canvas
 isn't blank, and reports frame timings.
 
-Requires a browser: `npx playwright install chromium`. In a locked-down
-environment, point `CHROME_BIN` (and `CHROME_LIBS`) at an existing build instead.
+Requires a browser:
+
+```bash
+npx playwright install chromium   # the normal way
+npm run shots
+```
+
+If that download is blocked (locked-down CI, a sandbox with a partial egress
+allowlist), there's a fallback that pulls a prebuilt Chromium from the npm
+registry instead, together with the shared libraries and software GL driver it
+needs:
+
+```bash
+eval "$(npm run --silent setup:chromium)"   # exports CHROME_BIN + CHROME_LIBS
+npm run shots
+```
+
+`shots.mjs` uses `CHROME_BIN` / `CHROME_LIBS` when they're set and Playwright's
+own browser otherwise, so neither path is special-cased in the test itself.
 
 ---
 

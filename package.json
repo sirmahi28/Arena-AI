@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "node tools/board-sim.mjs 1500",
     "test:calibrate": "node tools/board-sim.mjs 300 --calibrate",
-    "shots": "node tools/shots.mjs"
+    "shots": "node tools/shots.mjs",
+    "setup:chromium": "node tools/setup-chromium.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",
