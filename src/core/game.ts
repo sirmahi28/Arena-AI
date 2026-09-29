@@ -1397,55 +1397,58 @@ export class Game {
     ctx.save();
     ctx.globalAlpha = usable ? 1 : 0.42;
 
+    // No disc behind the icon. The atlas art is already a lit 3D object, and
+    // a plate under it just reads as a sticker on a button. What sells the
+    // lift is a shadow that follows the silhouette, so that is all it gets.
+    const s = b.w * 0.86;
+
+    // Armed used to be obvious because the whole disc went orange. The glow
+    // now carries that signal alone, so it has to be worth more than it was
+    // when it was only a halo around an already-orange plate.
     if (b.armed) {
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
-      ctx.globalAlpha = 0.35 + pulse * 0.4;
-      ctx.fillStyle = '#ffb547';
+      const rr = b.w * (0.72 + pulse * 0.12);
+      const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, rr);
+      rg.addColorStop(0, `rgba(255,196,96,${0.6 + pulse * 0.4})`);
+      rg.addColorStop(0.42, `rgba(255,150,40,${0.3 + pulse * 0.26})`);
+      rg.addColorStop(1, 'rgba(255,120,20,0)');
+      ctx.fillStyle = rg;
       ctx.beginPath();
-      ctx.arc(cx, cy, b.w * (0.62 + pulse * 0.12), 0, Math.PI * 2);
+      ctx.arc(cx, cy, rr, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
 
-    // lip
-    ctx.beginPath();
-    ctx.arc(cx, cy + 4, b.w / 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#2a1152';
-    ctx.fill();
-
-    const g = ctx.createLinearGradient(0, y, 0, y + b.h);
-    if (b.armed) {
-      g.addColorStop(0, '#ffcf6b');
-      g.addColorStop(1, '#f08b1c');
-    } else {
-      g.addColorStop(0, 'rgba(133,88,214,0.98)');
-      g.addColorStop(1, 'rgba(76,36,140,0.98)');
-    }
-    ctx.beginPath();
-    ctx.arc(cx, cy, b.w / 2, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.34)';
-    ctx.lineWidth = 1.6;
-    ctx.stroke();
-
-    // gloss
+    // Contact shadow: a squashed blob on the floor, keeping the icon from
+    // looking like it is pasted flat onto the backdrop.
     ctx.save();
-    ctx.clip();
-    const gl = ctx.createLinearGradient(0, y, 0, y + b.h * 0.5);
-    gl.addColorStop(0, 'rgba(255,255,255,0.4)');
-    gl.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gl;
-    ctx.fillRect(b.x, y, b.w, b.h * 0.5);
+    ctx.translate(cx, cy + s * 0.47);
+    ctx.scale(1, 0.3);
+    const gs = ctx.createRadialGradient(0, 0, 0, 0, 0, s * 0.44);
+    gs.addColorStop(0, 'rgba(8,2,22,0.6)');
+    gs.addColorStop(0.6, 'rgba(8,2,22,0.26)');
+    gs.addColorStop(1, 'rgba(8,2,22,0)');
+    ctx.fillStyle = gs;
+    ctx.beginPath();
+    ctx.arc(0, 0, s * 0.44, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
 
+    // Cast shadow, hugging the icon's own alpha. Chrome scales shadow
+    // offsets by the CTM (tools/shadow-probe.mjs), so these are plain CSS
+    // pixels — multiplying by dpr would double them on a retina canvas.
     ctx.save();
     ctx.translate(cx, cy);
-    drawIcon(ctx, b.icon ?? 'bulb', b.w * 0.52);
+    if (b.armed) ctx.scale(1 + pulse * 0.08, 1 + pulse * 0.08);
+    ctx.shadowColor = 'rgba(5,1,16,0.85)';
+    ctx.shadowBlur = s * 0.11;
+    ctx.shadowOffsetY = s * 0.1;
+    ctx.shadowOffsetX = s * 0.035;
+    drawIcon(ctx, b.icon ?? 'bulb', s);
     ctx.restore();
 
-    drawBadge(ctx, cx + b.w * 0.36, y + b.h * 0.1, Math.max(8, b.w * 0.19), b.charges ?? 0);
+    drawBadge(ctx, cx + s * 0.47, cy - s * 0.45, Math.max(8, b.w * 0.19), b.charges ?? 0);
 
     ctx.globalAlpha = usable ? 0.85 : 0.4;
     ctx.textAlign = 'center';

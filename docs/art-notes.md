@@ -440,3 +440,32 @@ inside the committed WebP. `npm run art` will happily skip the icon target
 when its source is absent and leave the shipped file alone — that is the
 behaviour keeping them alive. Anything generated has to become a committed
 asset in the same sitting, or it is not real.
+
+## Boosters: the disc had to go too
+
+The icons became real 3D artwork and then kept sitting on a purple plate,
+which is the one arrangement guaranteed to make them look like stickers. A
+lit object on a flat disc reads as a decal on a button, not as an object.
+
+So the disc, its lip, its rim stroke and its gloss sweep are all gone. The
+icon is drawn at `b.w * 0.86` — it can be much bigger now that it is not
+sharing the space — and what grounds it is shadow rather than geometry: a
+squashed radial blob on the floor under it, plus a cast shadow that hugs the
+icon's own alpha via `ctx.shadowColor`/`shadowBlur`/`shadowOffset`.
+
+Shadow offsets needed a decision. The spec says they are unaffected by the
+transform; Chrome scales them by the CTM. `tools/shadow-probe.mjs` settles it
+in about half a second — draw a rect under `setTransform(2,…)`, measure where
+the shadow lands — and the answer is that Chrome scales. The offsets are
+therefore plain CSS pixels; multiplying by `dpr` would double them on a
+retina canvas, which is exactly the too-detached look the first attempt had.
+
+Removing all that per-frame gradient and clip work made the footer cheaper,
+not dearer: 76 ms median to **45.5 ms** on the same machine and scene.
+
+One thing had to be paid back. `armed` used to be unmissable because the
+entire disc turned orange, and with no disc the only remaining signal is the
+glow behind the icon. It is now roughly twice as strong and reaches further
+(`0.72 * b.w` against `0.58`), and the icon itself breathes up to 8 % larger
+on the pulse. `tools/armed-probe.mjs` arms the hammer and screenshots it, so
+that cue can be checked without playing to a booster by hand.
