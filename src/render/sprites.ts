@@ -95,62 +95,123 @@ function candyPath(ctx: CanvasRenderingContext2D, kind: number, r: number): void
 }
 
 function drawBody(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
-  const [base, light, dark] = PALETTE[color % PALETTE.length];
+  const [base, light, dark, spark] = PALETTE[color % PALETTE.length];
 
-  // Drop shadow beneath the candy
+  // ---------------------------------------------------------------- shadow
+  // Contact shadow: wider and softer than the candy, offset down, so the
+  // piece reads as sitting *above* the board rather than painted onto it.
   ctx.save();
-  ctx.translate(0, r * 0.1);
-  ctx.fillStyle = 'rgba(12,4,28,0.34)';
-  ctx.filter = `blur(${Math.max(1, r * 0.1)}px)`;
-  candyPath(ctx, color, r * 0.96);
+  ctx.translate(0, r * 0.16);
+  ctx.fillStyle = 'rgba(10,3,24,0.42)';
+  ctx.filter = `blur(${Math.max(1.5, r * 0.16)}px)`;
+  candyPath(ctx, color, r * 0.94);
   ctx.fill();
   ctx.restore();
 
-  // Main body
-  const g = ctx.createRadialGradient(-r * 0.3, -r * 0.42, r * 0.06, 0, r * 0.15, r * 1.32);
+  // ------------------------------------------------------------------ body
+  // Key light from the upper-left. Four stops instead of three: the extra
+  // mid-tone is what stops the sphere reading as a flat disc.
+  // Form comes from the *dark* end of the ramp, not from piling on white —
+  // washing the midtones out just makes every candy look like pastel chalk.
+  const g = ctx.createRadialGradient(-r * 0.34, -r * 0.46, r * 0.04, -r * 0.05, r * 0.2, r * 1.45);
   g.addColorStop(0, light);
-  g.addColorStop(0.45, base);
-  g.addColorStop(1, dark);
+  g.addColorStop(0.3, base);
+  g.addColorStop(0.72, base);
+  g.addColorStop(0.92, dark);
+  g.addColorStop(1, shade(dark, 0.66));
   ctx.fillStyle = g;
   candyPath(ctx, color, r);
   ctx.fill();
 
-  // Rim light from below
   ctx.save();
+  candyPath(ctx, color, r);
   ctx.clip();
-  const rim = ctx.createLinearGradient(0, r * 0.25, 0, r);
+
+  // Subsurface scattering: light bleeding through the translucent middle,
+  // the trick that makes boiled sweets and gummies look edible.
+  const sss = ctx.createRadialGradient(r * 0.1, r * 0.36, 0, r * 0.1, r * 0.36, r * 0.9);
+  sss.addColorStop(0, withAlpha(light, 0.26));
+  sss.addColorStop(0.6, withAlpha(base, 0.08));
+  sss.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = sss;
+  ctx.fillRect(-r, -r, r * 2, r * 2);
+
+  // Occlusion in the lower-right, opposite the key light.
+  const occ = ctx.createRadialGradient(r * 0.58, r * 0.62, r * 0.05, r * 0.3, r * 0.4, r * 1.2);
+  occ.addColorStop(0, 'rgba(18,4,38,0.42)');
+  occ.addColorStop(1, 'rgba(18,4,38,0)');
+  ctx.fillStyle = occ;
+  ctx.fillRect(-r, -r, r * 2, r * 2);
+
+  // Bounce light climbing the bottom edge, tinted with the candy's own hue.
+  const rim = ctx.createLinearGradient(0, r * 0.35, 0, r);
   rim.addColorStop(0, 'rgba(255,255,255,0)');
-  rim.addColorStop(1, 'rgba(255,255,255,0.4)');
+  rim.addColorStop(0.75, withAlpha(light, 0.16));
+  rim.addColorStop(1, withAlpha(light, 0.42));
   ctx.fillStyle = rim;
   ctx.fillRect(-r, -r, r * 2, r * 2);
+
+  // Bevel: a bright inner lip along the top-left edge.
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.strokeStyle = withAlpha(spark, 0.3);
+  ctx.lineWidth = Math.max(1, r * 0.1);
+  ctx.save();
+  ctx.translate(-r * 0.045, -r * 0.055);
+  candyPath(ctx, color, r * 0.985);
+  ctx.stroke();
+  ctx.restore();
+  ctx.globalCompositeOperation = 'source-over';
   ctx.restore();
 
-  // Outline
-  ctx.strokeStyle = 'rgba(30,10,55,0.45)';
-  ctx.lineWidth = Math.max(1, r * 0.075);
+  // --------------------------------------------------------------- outline
+  ctx.strokeStyle = 'rgba(26,8,48,0.5)';
+  ctx.lineWidth = Math.max(1, r * 0.07);
   candyPath(ctx, color, r);
   ctx.stroke();
 
-  // Glossy highlight
+  // ------------------------------------------------------------- highlights
   ctx.save();
   candyPath(ctx, color, r);
   ctx.clip();
-  ctx.globalAlpha = 0.85;
-  const hl = ctx.createRadialGradient(-r * 0.32, -r * 0.46, 0, -r * 0.32, -r * 0.46, r * 0.62);
-  hl.addColorStop(0, 'rgba(255,255,255,0.95)');
+
+  // Broad soft specular.
+  const hl = ctx.createRadialGradient(-r * 0.3, -r * 0.46, 0, -r * 0.3, -r * 0.46, r * 0.66);
+  hl.addColorStop(0, 'rgba(255,255,255,0.62)');
+  hl.addColorStop(0.5, 'rgba(255,255,255,0.14)');
   hl.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = hl;
   ctx.beginPath();
-  ctx.ellipse(-r * 0.3, -r * 0.44, r * 0.42, r * 0.3, -0.5, 0, TAU);
+  ctx.ellipse(-r * 0.29, -r * 0.45, r * 0.4, r * 0.29, -0.5, 0, TAU);
   ctx.fill();
 
-  // Tiny secondary sparkle
-  ctx.globalAlpha = 0.6;
+  // Tight hot spot — the glassy "wet" pinpoint.
+  ctx.fillStyle = 'rgba(255,255,255,0.97)';
+  ctx.beginPath();
+  ctx.ellipse(-r * 0.34, -r * 0.5, r * 0.17, r * 0.12, -0.5, 0, TAU);
+  ctx.fill();
+
+  // Secondary glint low-right, from the bounce light.
+  ctx.globalAlpha = 0.42;
   ctx.fillStyle = '#fff';
   ctx.beginPath();
-  ctx.ellipse(r * 0.4, r * 0.34, r * 0.16, r * 0.1, 0.7, 0, TAU);
+  ctx.ellipse(r * 0.38, r * 0.36, r * 0.16, r * 0.09, 0.7, 0, TAU);
   ctx.fill();
   ctx.restore();
+}
+
+/** Darken a hex colour toward black by `k` (0..1 = black..unchanged). */
+function shade(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * k);
+  const g = Math.round(((n >> 8) & 255) * k);
+  const b = Math.round((n & 255) * k);
+  return `rgb(${r},${g},${b})`;
+}
+
+/** Same colour, explicit alpha. */
+function withAlpha(hex: string, a: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
 function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, horizontal: boolean): void {

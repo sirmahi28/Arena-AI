@@ -959,13 +959,18 @@ export class Game {
 
     for (const t of this.board.tiles) {
       if (!t) continue;
-      const [px, py] = this.cellToPx(t.x, t.y);
+      // Impact displacement rides on top of the logical position.
+      const [px, py] = this.cellToPx(t.x + t.ox, t.y + t.oy);
       const spawn = t.spawnT < 1 ? easeOutBack(t.spawnT, 2.4) : 1;
       const hintPulse = t.hint > 0 ? Math.sin(this.titleT * 9) * 0.1 * t.hint : 0;
       const s = t.scale * spawn * (1 + hintPulse);
       if (s <= 0.01) continue;
-      const sx = s * (1 + t.squash * 0.55);
-      const sy = s * (1 - t.squash * 0.55);
+      // Jelly: a decaying sine ripple that stretches one axis while squeezing
+      // the other, so a shoved candy wobbles like gelatin instead of just
+      // sliding. Phase is per-tile so a whole row never pulses in lockstep.
+      const jw = t.jelly > 0 ? Math.sin(this.titleT * 26 + t.jellyPhase) * t.jelly * 0.22 : 0;
+      const sx = s * (1 + t.squash * 0.55 + jw);
+      const sy = s * (1 - t.squash * 0.55 - jw);
 
       const img = this.sprites.get(t.color, t.special);
 

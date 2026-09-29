@@ -13,39 +13,79 @@ export const FX = {
   candyPop(ps: ParticleSystem, x: number, y: number, color: ColorId, cell: number, power = 1) {
     const [base, light, , spark] = paletteOf(color);
 
+    // 1. Chunky shards — the candy itself coming apart. Heavy, spinning,
+    //    falling out of the blast under real gravity.
     ps.emit({
       x,
       y,
       count: Math.round(9 * power),
       spread: cell * 0.18,
-      speed: [90 * power, 320 * power],
-      life: [0.32, 0.6],
-      size: [cell * 0.07, cell * 0.16],
+      speed: [110 * power, 360 * power],
+      life: [0.36, 0.72],
+      size: [cell * 0.08, cell * 0.19],
       sizeEnd: 0,
-      gravity: 900,
-      drag: 0.35,
+      gravity: 980,
+      drag: 0.32,
       colors: [base, light, spark],
       shape: 'shard',
       additive: false,
-      spin: [-14, 14],
+      spin: [-18, 18],
     });
 
+    // 2. Fine glitter — fast, weightless, additive, gone almost instantly.
+    //    This is what reads as "sparkle" rather than "debris".
     ps.emit({
       x,
       y,
-      count: Math.round(12 * power),
+      count: Math.round(11 * power),
       spread: cell * 0.2,
-      speed: [70, 300 * power],
-      life: [0.22, 0.5],
-      size: [cell * 0.05, cell * 0.17],
+      speed: [80, 360 * power],
+      life: [0.2, 0.46],
+      size: [cell * 0.04, cell * 0.15],
       sizeEnd: 0,
-      gravity: 120,
-      drag: 0.9,
+      gravity: 90,
+      drag: 0.92,
       colors: [light, spark, '#ffffff'],
       shape: 'spark',
       additive: true,
     });
 
+    // 3. Radiating speed lines, sold as motion rather than matter.
+    ps.emit({
+      x,
+      y,
+      count: Math.round(5 * power),
+      spread: cell * 0.06,
+      speed: [260 * power, 520 * power],
+      life: [0.14, 0.26],
+      size: [cell * 0.05, cell * 0.09],
+      sizeEnd: 0,
+      gravity: 0,
+      drag: 0.6,
+      colors: [spark, '#ffffff'],
+      shape: 'streak',
+      additive: true,
+    });
+
+    // 4. Twinkling stars, a handful, slow enough to actually register.
+    ps.emit({
+      x,
+      y,
+      count: Math.round(3 * power),
+      spread: cell * 0.3,
+      speed: [40, 170 * power],
+      life: [0.3, 0.62],
+      size: [cell * 0.1, cell * 0.2],
+      sizeEnd: 0,
+      gravity: 60,
+      drag: 1.1,
+      colors: ['#ffffff', spark, light],
+      shape: 'star',
+      additive: true,
+      spin: [-7, 7],
+    });
+
+    // 5. Primary shockwave.
     ps.emit({
       x,
       y,
@@ -53,25 +93,41 @@ export const FX = {
       speed: [0, 0],
       life: [0.3, 0.3],
       size: [cell * 0.18, cell * 0.18],
-      sizeEnd: cell * 0.95 * power,
+      sizeEnd: cell * 1.05 * power,
       colors: [light],
       shape: 'ring',
       additive: true,
-      thickness: cell * 0.09,
+      thickness: cell * 0.1,
     });
 
-    // A light sugar-dust puff. Using the dark palette entry here read as
-    // muddy brown smudges against the deep purple board.
+    // 6. Second, faster, thinner ring — a double pulse reads far punchier
+    //    than one ring, for one extra particle.
+    ps.emit({
+      x,
+      y,
+      count: 1,
+      speed: [0, 0],
+      life: [0.19, 0.19],
+      size: [cell * 0.1, cell * 0.1],
+      sizeEnd: cell * 0.72 * power,
+      colors: ['#ffffff'],
+      shape: 'ring',
+      additive: true,
+      thickness: cell * 0.045,
+    });
+
+    // 7. Sugar-dust puff drifting up. Light palette entries only — the dark
+    //    ones read as muddy brown smudges against the deep purple board.
     ps.emit({
       x,
       y,
       count: Math.round(3 * power),
-      spread: cell * 0.28,
-      speed: [10, 55],
-      life: [0.35, 0.6],
-      size: [cell * 0.16, cell * 0.28],
-      sizeEnd: cell * 0.44,
-      gravity: -70,
+      spread: cell * 0.3,
+      speed: [10, 60],
+      life: [0.38, 0.66],
+      size: [cell * 0.16, cell * 0.3],
+      sizeEnd: cell * 0.5,
+      gravity: -80,
       drag: 1.5,
       colors: [light, base],
       shape: 'smoke',

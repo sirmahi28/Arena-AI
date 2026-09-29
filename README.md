@@ -84,8 +84,11 @@ that pops triggers:
 
 - **Shards** that tumble under gravity in the candy's own colours
 - **Additive sparks** for the bloom, on a separate render pass so the glow stacks
-- **A shockwave ring** that expands and thins out
+- **Two shockwave rings** — a wide slow one and a tight fast one, because a
+  double pulse reads far punchier than a single ring for one extra particle
+- **Radiating speed lines** and **twinkling stars**
 - **Sugar dust** drifting upward
+- **A physical shove to every neighbouring candy** — see below
 - **Squash-and-stretch** — candies inflate before they implode, and land with a bounce
 - **Screen shake** using a trauma model (shake² so small hits stay subtle and big
   ones really kick), plus **hit-stop** that freezes time for ~50 ms on a detonation
@@ -93,6 +96,30 @@ that pops triggers:
 - **Floating score text** that pops in with an elastic overshoot
 - **Haptics** via `navigator.vibrate`, with a pattern per event type
 - **A rising musical note** per cascade step, climbing a pentatonic ladder
+
+### Neighbouring candies actually get hit
+
+The effect that does the most work is the cheapest one. Every tile carries a
+spring-damper displacement (`ox/oy`, `ovx/ovy`) layered on top of its grid
+position at render time, so the logical board is never disturbed. When a candy
+pops it shoves everything around it outward along the blast vector, with
+inverse-square falloff and a bigger radius for specials; a landing candy thumps
+whatever it lands on. Each shoved tile also gains `jelly`, a decaying sine that
+stretches one axis while squeezing the other, with a per-tile phase so a row
+never wobbles in lockstep.
+
+The result is that a match doesn't just delete candies — the whole
+neighbourhood recoils and springs back. Measured cost: **~2 ms/frame** under a
+software rasteriser.
+
+### Candies are lit, not just coloured
+
+The sprite shading is built from the dark end of the ramp rather than by piling
+on white: a five-stop body gradient, subsurface scattering bleeding through the
+middle, ambient occlusion opposite the key light, a hue-tinted bounce light
+climbing the bottom edge, a bevel lip on the top-left, and a tight specular hot
+spot. The first attempt used the bright end for all of it and every candy came
+out looking like pastel chalk — form has to come from shadow.
 
 ```
 src/fx/

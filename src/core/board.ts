@@ -36,6 +36,15 @@ const GRAVITY = 62; // cells / s^2
 const MAX_FALL = 30; // cells / s
 const SHUFFLE_TIME = 0.75;
 
+const TAU = Math.PI * 2;
+
+// Neighbour impact spring. Tuned so a pop shoves the cells around it roughly a
+// fifth of a cell and they bounce back in ~0.35s with one visible overshoot —
+// springy, not floaty, and settled well before the next cascade lands.
+const IMPULSE_PUSH = 3.2; // cells/s of initial velocity at distance 1
+const IMPULSE_K = 260; // spring stiffness
+const IMPULSE_DAMP = 13; // damping
+
 type Phase = 'idle' | 'swapping' | 'rejecting' | 'clearing' | 'falling' | 'shuffling' | 'locked';
 
 interface MatchGroup {
@@ -109,7 +118,62 @@ export class Board {
       fired: false,
       burst: false,
       hint: 0,
+      ox: 0,
+      oy: 0,
+      ovx: 0,
+      ovy: 0,
+      jelly: 0,
+      jellyPhase: (this.nextId * 1.7) % TAU,
     };
+  }
+
+  /**
+   * Shove everything around (col,row) outward, as if a candy just detonated
+   * there. Neighbours are pushed along the vector away from the blast and left
+   * to spring back, which is what sells the hit as physical rather than
+   * decorative. Diagonals get less, distant cells get less again.
+   *
+   * @param power 1 = an ordinary pop, 2-3 = a special going off.
+   */
+  impulseAt(col: number, row: number, power = 1): void {
+    const reach = power >= 2.5 ? 2 : 1;
+    for (let dr = -reach; dr <= reach; dr++) {
+      for (let dc = -reach; dc <= reach; dc++) {
+        if (dc === 0 && dr === 0) continue;
+        const t = this.at(col + dc, row + dr);
+        if (!t || t.state === 'clearing') continue;
+        const dist = Math.hypot(dc, dr);
+        if (dist > reach + 0.2) continue;
+        // Inverse falloff, so the ring next to the blast takes most of it.
+        const falloff = 1 / (dist * dist);
+        const push = IMPULSE_PUSH * power * falloff;
+        t.ovx += (dc / dist) * push;
+        t.ovy += (dr / dist) * push;
+        t.jelly = Math.min(1, t.jelly + 0.55 * power * falloff);
+      }
+    }
+  }
+
+  /** Spring the impact displacement back to rest. Semi-implicit Euler. */
+  private updateImpacts(dt: number): void {
+    // Sub-step so a big impulse can't overshoot into instability at low fps.
+    const steps = dt > 1 / 45 ? 2 : 1;
+    const h = dt / steps;
+    for (let s = 0; s < steps; s++) {
+      for (const t of this.tiles) {
+        if (!t) continue;
+        if (t.ox === 0 && t.oy === 0 && t.ovx === 0 && t.ovy === 0) continue;
+        t.ovx += (-IMPULSE_K * t.ox - IMPULSE_DAMP * t.ovx) * h;
+        t.ovy += (-IMPULSE_K * t.oy - IMPULSE_DAMP * t.ovy) * h;
+        t.ox += t.ovx * h;
+        t.oy += t.ovy * h;
+        // Snap to rest once the motion is imperceptible, so tiles leave the
+        // hot loop instead of jittering forever.
+        if (Math.abs(t.ox) < 1e-4 && Math.abs(t.oy) < 1e-4 && Math.abs(t.ovx) < 1e-3 && Math.abs(t.ovy) < 1e-3) {
+          t.ox = t.oy = t.ovx = t.ovy = 0;
+        }
+      }
+    }
   }
 
   reset(colorCount = 6): void {
@@ -215,6 +279,7 @@ export class Board {
   update(dt: number): void {
     this.time += dt;
     this.updateVisuals(dt);
+    this.updateImpacts(dt);
 
     switch (this.phase) {
       case 'idle':
@@ -252,6 +317,7 @@ export class Board {
       t.glow = Math.max(0, t.glow - dt * 2.4);
       if (t.spawnT < 1) t.spawnT = Math.min(1, t.spawnT + dt * 3.4);
       if (t.hint > 0) t.hint = Math.max(0, t.hint - dt * 2);
+      if (t.jelly > 0) t.jelly = Math.max(0, t.jelly - dt * 2.6);
       if (t.special !== 'none') t.rot = Math.sin(this.time * 2.2 + t.id) * 0.08;
     }
   }
@@ -733,6 +799,9 @@ export class Board {
       t.glow = Math.min(1, p * 2.2);
       if (!t.burst && p >= 0.45) {
         t.burst = true;
+        // Shove the surrounding candies away from the blast.
+        const power = t.special === 'none' ? 1 : t.special === 'wrapped' || t.special === 'bomb' ? 3 : 2;
+        this.impulseAt(t.col, t.row, power);
         this.hooks.onPop(t, this.cascade);
       }
     }
@@ -814,8 +883,15 @@ export class Board {
         const force = clamp(t.vy / 18, 0.15, 1);
         t.y = t.row;
         t.state = 'idle';
-        t.squash = force * 0.42;
+        t.squash = force * 0.52;
         t.vy = 0;
+        // A landing candy thumps whatever it lands on, and jiggles itself.
+        t.jelly = Math.min(1, t.jelly + force * 0.5);
+        const below = this.at(t.col, t.row + 1);
+        if (below && below.state === 'idle') {
+          below.ovy += force * 1.9;
+          below.jelly = Math.min(1, below.jelly + force * 0.32);
+        }
         this.hooks.onLand(t, force);
       } else {
         moving = true;

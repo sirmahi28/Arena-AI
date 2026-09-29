@@ -47,6 +47,21 @@ export interface Tile {
 
   /** Used by the hint system. */
   hint: number;
+
+  // --- Impact response -----------------------------------------------------
+  // A candy popping shoves its neighbours around. These are a spring-damper
+  // displacement in *cell units*, layered on top of x/y at render time, so the
+  // logical grid is never disturbed.
+  /** Displacement from rest. */
+  ox: number;
+  oy: number;
+  /** Displacement velocity. */
+  ovx: number;
+  ovy: number;
+  /** Jelly wobble amount 0..1, decays; drives a sine ripple in the sprite. */
+  jelly: number;
+  /** Per-tile phase so neighbours don't wobble in lockstep. */
+  jellyPhase: number;
 }
 
 export interface Cell {
