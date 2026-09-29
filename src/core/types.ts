@@ -74,8 +74,8 @@ export const idx = (col: number, row: number, cols: number): number => row * col
 /** Candy palette: [base, light, dark, spark] */
 /**
  * Sampled from the candy atlas rather than hand-picked, so particles, glows
- * and combo text match the painted art exactly. Regenerate with the sampler
- * documented in docs/art-notes.md if the atlas is ever redrawn.
+ * and combo text match the painted art exactly. Regenerate with `npm run art`, which
+ * prints a fresh block to paste here whenever the atlas is rebuilt.
  *
  * base = mid-tone body (specular hotspot and lacquer rim excluded from the
  * sample), then light / dark / spark derived from it. Saturation is pushed
@@ -83,12 +83,12 @@ export const idx = (col: number, row: number, cols: number): number => row * col
  * tint there reads as grey ash rather than candy.
  */
 export const PALETTE: ReadonlyArray<readonly [string, string, string, string]> = [
-  ['#cf1c40', '#f65b7a', '#5b0819', '#f4aebc'], // 0 strawberry
-  ['#f4810c', '#ffb467', '#6c3600', '#fcdcbc'], // 1 orange
-  ['#f2b815', '#ffd96e', '#6e5101', '#fcedc3'], // 2 lemon
-  ['#25c624', '#62ef61', '#0c570c', '#b1f1b1'], // 3 apple
-  ['#43aeee', '#99d8fe', '#054f7b', '#ebf7fd'], // 4 blueberry
-  ['#af3ad6', '#d586f0', '#4e1062', '#edd2f6'], // 5 grape
+  ['#bb2237', '#ee556a', '#520b15', '#efa6b0'], // 0 strawberry
+  ['#df720f', '#ffa655', '#623002', '#f9d1ac'], // 1 orange
+  ['#e4be1c', '#fadf6c', '#645307', '#f8edc0'], // 2 lemon
+  ['#2eb419', '#57f43f', '#114f07', '#a1f094'], // 3 apple
+  ['#1378cb', '#47abfd', '#043359', '#a0cff6'], // 4 blueberry
+  ['#9628b8', '#c85de9', '#410e50', '#ddabed'], // 5 grape
 ];
 
 export const BOMB_PALETTE: readonly [string, string, string, string] = [

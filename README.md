@@ -29,7 +29,7 @@ It's built for a phone. On desktop, open devtools and switch to a mobile viewpor
 npm run build:standalone     # → dist-standalone/sugar-rush.html
 ```
 
-That's the entire game — code, art and audio — inlined into a single ~248 KB
+That's the entire game — code, art and audio — inlined into a single ~240 KB
 HTML file. Double-click it, email it to yourself, or copy it onto a phone; it
 needs no server, no install and no network. `npm run verify:standalone` opens
 it over `file://` with **every** network request blocked and checks it still
@@ -37,7 +37,7 @@ boots, paints, takes input and fires its particle effects.
 
 (Most of the art and *all* the sound is procedural, which is what makes a
 single file possible at all. The three binary assets — the painted backdrop,
-the title lettering and the candy atlas, 128 KB between them — get
+the title lettering and the candy atlas, 121 KB between them — get
 base64-inlined. The one
 remote reference left is the Google Fonts stylesheet, deliberately kept as a
 progressive enhancement: online you get Baloo 2, offline you get the system
@@ -201,8 +201,8 @@ headlessly at thousands of moves per second, without a browser.
 
 ### Two images, and everything else is code
 
-The game ships three binary assets totalling 128 KB: a painted backdrop
-(19 KB), the title lettering (45 KB) and a candy atlas (62 KB — six bodies
+The game ships three binary assets totalling 121 KB: a painted backdrop
+(19 KB), the title lettering (45 KB) and a candy atlas (56 KB — six bodies
 plus the colour bomb, 3x3 at 256px a cell). Every button, icon, star,
 particle, stripe and wrapper is still drawn from code at runtime.
 
@@ -212,13 +212,21 @@ at arbitrary cell sizes — but sprites do all of that fine. The only thing they
 genuinely can't do is recolour, and that was never needed: six hues means six
 sprites. What canvas gradients genuinely can't do is a lacquered edge, a
 luminous core and a tight specular hotspot at once, and across 63 pieces that
-gap is the whole look of the game. Swapping them in also cut the frame time
-from 71.9 ms to 51.8 ms, because a blit beats six gradients per piece.
+gap is the whole look of the game. Swapping them in also cut the frame time,
+because a blit beats six gradients per piece.
 
 What stayed procedural is what actually wants to be: the per-piece contact
 shadow (drawn with `destination-over` so it tucks behind), and the stripe and
 wrapper overlays (drawn with `source-atop`, which clips them to the painted
 silhouette exactly — a geometric clip path no longer lines up with it).
+
+Those overlays **measure the art rather than assuming it**. Stripe opacity has
+to scale with how bright a candy is — white ribs read beautifully on the
+strawberry and bleach the lemon to white — and reading that brightness off
+`PALETTE` only worked for one particular set of pictures. `measureAtlas()`
+downsamples each cell to 8x8 on load and takes the mean luminance of the
+opaque pixels instead. Redraw the atlas and the overlays retune themselves,
+which is what made swapping the whole candy style safe.
 
 `docs/art-notes.md` has the generation prompts, the cut-out pipeline and the
 format comparison that landed on WebP (it beat palette PNG on both size *and*

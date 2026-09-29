@@ -5,8 +5,8 @@
  *
  *   art-src/bg-raw.png     →  src/assets/bg.webp           (~19 KB)
  *   art-src/logo-raw.png   →  src/assets/logo.webp         (~46 KB)
- *   art-src/candy-B.png  ⎤
- *   art-src/bomb-raw.png ⎦ →  src/assets/candy-atlas.webp  (~63 KB)
+ *   art-src/candy-sheet.png ⎤
+ *   art-src/bomb-cell.png   ⎦ →  src/assets/candy-atlas.webp  (~63 KB)
  *
  *   node tools/build-art.mjs        (or: npm run art)
  *
@@ -134,14 +134,13 @@ target('logo.webp', ['art-src/logo-raw.png'], () => {
 const REACH = [0.88, 0.84, 1.0, 0.97, 0.93, 0.99, 0.98];
 const CELL = 256;
 
-target('candy-atlas.webp', ['art-src/candy-B.png', 'art-src/bomb-raw.png'], () => {
+target('candy-atlas.webp', ['art-src/candy-sheet.png', 'art-src/bomb-cell.png'], () => {
   rmSync(TMP, { recursive: true, force: true });
   mkdirSync(TMP, { recursive: true });
 
-  convert(['art-src/candy-B.png', '-crop', '3x2@', '+repage', `${TMP}/t-%d.png`]);
-  execFileSync('cp', ['art-src/bomb-raw.png', `${TMP}/t-6.png`]);
+  convert(['art-src/candy-sheet.png', '-crop', '3x2@', '+repage', `${TMP}/t-%d.png`]);
 
-  for (let i = 0; i < REACH.length; i++) {
+  for (let i = 0; i < 6; i++) {
     const side = Math.round(REACH[i] * CELL);
     cutout(`${TMP}/t-${i}.png`, `${TMP}/n-${i}.png`, [
       '-resize', `${side}x${side}`,
@@ -150,6 +149,10 @@ target('candy-atlas.webp', ['art-src/candy-B.png', 'art-src/bomb-raw.png'], () =
       '-extent', `${CELL}x${CELL}`,
     ]);
   }
+  // The bomb comes in pre-cut and pre-normalised, so it skips the pipeline
+  // above. Its raw render was lost; this cell was recovered from the shipped
+  // atlas, which is the same art either way.
+  execFileSync('cp', ['art-src/bomb-cell.png', `${TMP}/n-6.png`]);
   convert(['-size', `${CELL}x${CELL}`, 'xc:none', `${TMP}/n-blank.png`]);
 
   execFileSync('montage', [
@@ -171,6 +174,78 @@ target('candy-atlas.webp', ['art-src/candy-B.png', 'art-src/bomb-raw.png'], () =
   rmSync(TMP, { recursive: true, force: true });
 });
 
+/**
+ * Sample PALETTE straight out of the atlas.
+ *
+ * Particles, glows and combo text are tinted from PALETTE, so if it is
+ * hand-picked it drifts away from the art and bursts stop matching the candy
+ * that produced them. Deriving it removes the chance to get that wrong.
+ *
+ * Only mid-tone body pixels are sampled: include the specular hotspot and the
+ * "colour" comes out white, include the rim and it comes out near-black.
+ *
+ * Printed rather than written, because clobbering a source file from a build
+ * script is a nasty surprise. Paste it into src/core/types.ts.
+ */
+function samplePalette() {
+  const names = ['strawberry', 'orange', 'lemon', 'apple', 'blueberry', 'grape'];
+  const rgbToHsl = (r, g, b) => {
+    r /= 255; g /= 255; b /= 255;
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
+    if (mx === mn) return [0, 0, l];
+    const d = mx - mn;
+    const s = l > 0.5 ? d / (2 - mx - mn) : d / (mx + mn);
+    const h = mx === r ? ((g - b) / d + (g < b ? 6 : 0)) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+    return [h / 6, s, l];
+  };
+  const hslToHex = (h, s, l) => {
+    s = Math.min(1, Math.max(0, s)); l = Math.min(1, Math.max(0, l));
+    const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h * 6) % 2) - 1)), m = l - c / 2;
+    const seg = Math.floor(h * 6) % 6;
+    const [r, g, b] = [[c,x,0],[x,c,0],[0,c,x],[0,x,c],[x,0,c],[c,0,x]][seg];
+    const to = (v) => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return `#${to(r)}${to(g)}${to(b)}`;
+  };
+
+  const lines = [];
+  for (let i = 0; i < 6; i++) {
+    const x = (i % 3) * CELL, y = Math.floor(i / 3) * CELL;
+    // 256x256 of "x,y: (r,g,b,a)" text is a few MB; the default 1 MB pipe
+    // buffer is nowhere near enough.
+    const txt = execFileSync(
+      'convert',
+      [`${OUT}/candy-atlas.webp`, '-crop', `${CELL}x${CELL}+${x}+${y}`, '+repage', '-depth', '8', 'txt:-'],
+      { maxBuffer: 64 * 1024 * 1024 },
+    ).toString();
+    let n = 0, sr = 0, sg = 0, sb = 0;
+    for (const line of txt.split('\n').slice(1)) {
+      const m = line.match(/\((\d+),(\d+),(\d+)(?:,([\d.]+))?\)/);
+      if (!m) continue;
+      if (m[4] !== undefined && Number(m[4]) < 0.95) continue;
+      const [r, g, b] = [Number(m[1]), Number(m[2]), Number(m[3])];
+      const [, sat, lum] = rgbToHsl(r, g, b);
+      if (lum <= 0.3 || lum >= 0.7 || sat <= 0.4) continue;
+      n++; sr += r; sg += g; sb += b;
+    }
+    if (!n) { lines.push(`  // ${names[i]}: no usable sample`); continue; }
+    const [br, bg, bb] = [Math.round(sr / n), Math.round(sg / n), Math.round(sb / n)];
+    const [h, sat, lum] = rgbToHsl(br, bg, bb);
+    const hex = `#${[br, bg, bb].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+    // Saturation is pushed UP as lightness rises. Letting it fall, the way a
+    // naive HLS lighten does, gives pastel chalk — and in additive particles a
+    // desaturated tint reads as grey ash rather than candy.
+    lines.push(
+      `  ['${hex}', '${hslToHex(h, Math.min(1, sat * 1.18), lum + 0.2)}', ` +
+      `'${hslToHex(h, Math.min(1, sat * 1.1), lum * 0.42)}', ` +
+      `'${hslToHex(h, Math.min(1, sat), lum + 0.36)}'], // ${i} ${names[i]}`,
+    );
+  }
+  console.log('\nPALETTE sampled from the atlas — paste into src/core/types.ts:\n');
+  console.log('export const PALETTE: ReadonlyArray<readonly [string, string, string, string]> = [');
+  console.log(lines.join('\n'));
+  console.log('];');
+}
+
 for (const name of built) console.log(`  rebuilt  ${OUT}/${name}  ${kb(`${OUT}/${name}`)}`);
 for (const s of skipped) console.log(`  skipped  ${s} (kept the committed file)`);
 
@@ -178,4 +253,5 @@ if (!built.length) {
   console.log('\nNothing to rebuild — no raw art present. Committed assets untouched.');
 } else {
   console.log('\n✅ art rebuilt');
+  if (built.includes('candy-atlas.webp')) samplePalette();
 }

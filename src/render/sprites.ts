@@ -29,6 +29,51 @@ const ATLAS_CELL = 256;
 const ATLAS_BOMB = 6;
 let atlas: HTMLImageElement | null = null;
 let atlasGen = 0;
+/** Mean luminance of each atlas cell's opaque pixels, measured on load. */
+const cellLum: number[] = [];
+
+/**
+ * Overlay strength has to be calibrated against how bright the art actually
+ * renders, and PALETTE is a poor proxy for that: these bodies are
+ * translucent, so their lit cores come out far paler than the mid-tone the
+ * palette samples. Driving stripe opacity off the palette bleached the orange
+ * teardrop to beige.
+ *
+ * So measure the art. Six 8x8 downsamples, once, on load — the GPU does the
+ * averaging during the downscale. Self-calibrating: redraw the atlas and the
+ * overlays retune themselves.
+ */
+function measureAtlas(img: HTMLImageElement): void {
+  const S = 8;
+  const cv = document.createElement('canvas');
+  cv.width = S;
+  cv.height = S;
+  const c = cv.getContext('2d', { willReadFrequently: true });
+  if (!c) return;
+  for (let i = 0; i < 7; i++) {
+    c.clearRect(0, 0, S, S);
+    c.drawImage(
+      img,
+      (i % ATLAS_COLS) * ATLAS_CELL,
+      Math.floor(i / ATLAS_COLS) * ATLAS_CELL,
+      ATLAS_CELL,
+      ATLAS_CELL,
+      0,
+      0,
+      S,
+      S,
+    );
+    const d = c.getImageData(0, 0, S, S).data;
+    let sum = 0;
+    let n = 0;
+    for (let p = 0; p < d.length; p += 4) {
+      if (d[p + 3] < 200) continue;
+      sum += (0.299 * d[p] + 0.587 * d[p + 1] + 0.114 * d[p + 2]) / 255;
+      n++;
+    }
+    cellLum[i] = n ? sum / n : 0.5;
+  }
+}
 
 {
   const img = new Image();
@@ -36,6 +81,7 @@ let atlasGen = 0;
   img.src = atlasUrl;
   img.onload = () => {
     atlas = img;
+    measureAtlas(img);
     atlasGen++;
   };
 }
@@ -296,8 +342,16 @@ function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, h
   // identify by colour is a piece you can't plan a match with. So the ribs get
   // weaker as the body gets brighter, and earn their contrast from a dark
   // separator line instead of from sheer brightness.
-  const lum = luminance(base);
-  const peak = 0.74 - 0.36 * lum;
+  // Measured off the art when it loaded; PALETTE is only the fallback for the
+  // few frames before that.
+  const lum = cellLum[color % 6] ?? luminance(base);
+  // Light ribs alone have to be near-opaque before they read, and at that
+  // strength they bleach the candy. Pairing each light rib with a dark one
+  // doubles the contrast for half the brightness push, so the body keeps its
+  // hue. Both halves scale with luminance, in opposite directions: a pale
+  // body wants less white and more shadow, a dark one the reverse.
+  const peak = 0.62 - 0.46 * lum;
+  const shadow = 0.22 + 0.4 * lum;
   ctx.save();
   // `source-atop` clips to the pixels already painted — which is the candy
   // itself. That matters now the body is a painted sprite: a geometric clip
@@ -327,18 +381,18 @@ function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, h
     if (horizontal) ctx.fillRect(-r * 1.2, o - band * 0.55, r * 2.4, band * 1.1);
     else ctx.fillRect(o - band * 0.55, -r * 1.2, band * 1.1, r * 2.4);
 
-    // Shadow line under each rib: this is what keeps the lemon legible.
-    ctx.strokeStyle = withAlpha(dark, 0.42);
-    ctx.lineWidth = Math.max(0.6, r * 0.035);
-    ctx.beginPath();
-    if (horizontal) {
-      ctx.moveTo(-r * 1.2, o + band * 0.58);
-      ctx.lineTo(r * 1.2, o + band * 0.58);
-    } else {
-      ctx.moveTo(o + band * 0.58, -r * 1.2);
-      ctx.lineTo(o + band * 0.58, r * 1.2);
-    }
-    ctx.stroke();
+    // The dark half of the pair, sitting in the gap. This is what actually
+    // makes the rib visible on a pale body.
+    const od = o + band * 1.03;
+    const dg = horizontal
+      ? ctx.createLinearGradient(0, od - band * 0.5, 0, od + band * 0.5)
+      : ctx.createLinearGradient(od - band * 0.5, 0, od + band * 0.5, 0);
+    dg.addColorStop(0, withAlpha(dark, 0));
+    dg.addColorStop(0.5, withAlpha(dark, shadow));
+    dg.addColorStop(1, withAlpha(dark, 0));
+    ctx.fillStyle = dg;
+    if (horizontal) ctx.fillRect(-r * 1.2, od - band * 0.5, r * 2.4, band);
+    else ctx.fillRect(od - band * 0.5, -r * 1.2, band, r * 2.4);
   }
 
   // Painting opaque white ribs over the body flattens the gloss that made it

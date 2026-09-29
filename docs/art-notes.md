@@ -1,6 +1,6 @@
 # Art notes
 
-The game ships **three** image files, 128 KB in total. Everything else on
+The game ships **three** image files, 121 KB in total. Everything else on
 screen — every button, icon, star, particle, stripe and wrapper — is still
 drawn from code at runtime.
 
@@ -8,7 +8,7 @@ drawn from code at runtime.
 |---|---|---|
 | `src/assets/bg.webp` | 19 KB | The painted backdrop |
 | `src/assets/logo.webp` | 45 KB | The `SUGAR RUSH` title lettering |
-| `src/assets/candy-atlas.webp` | 62 KB | Six candy bodies + the colour bomb, 3x3 at 256px |
+| `src/assets/candy-atlas.webp` | 56 KB | Six candy bodies + the colour bomb, 3x3 at 256px |
 
 Both are imported as ES modules, so a normal `npm run build` emits them as
 hashed files and `npm run build:standalone` inlines them as data URLs (its
@@ -43,11 +43,30 @@ procedural still are:
   `source-atop` — that respects the painted silhouette exactly, where a
   geometric clip path would no longer line up with it.
 
-Stripe contrast adapts to the body: white ribs read beautifully on the
-strawberry and hopelessly on the lemon, because a light candy under light
-stripes just turns white, and a piece you cannot identify by colour is a piece
-you cannot plan a match with. Rib opacity therefore falls as body luminance
-rises, and the contrast comes from a dark separator line instead.
+### Overlays calibrate themselves against the art
+
+White ribs read beautifully on the strawberry and hopelessly on the lemon: a
+light candy under light stripes just turns white, and a piece you cannot
+identify by colour is a piece you cannot plan a match with.
+
+Two mechanisms fix this, and the second is the one that matters.
+
+**Ribs come in pairs.** Each light rib is followed by a dark one in the gap.
+That doubles the contrast for half the brightness push, so a striped piece
+keeps its hue instead of bleaching toward white.
+
+**Strength is measured, not assumed.** Opacity scales with how bright the art
+actually is — light rib weaker and dark rib stronger as luminance rises. The
+first version read that luminance off `PALETTE`, which worked for the
+lacquered art and failed badly for the translucent art, whose lit cores render
+far paler than the mid-tone the palette samples: the orange teardrop came out
+beige. So `measureAtlas()` now downsamples each cell to 8x8 on load and takes
+the mean luminance of the opaque pixels — six tiny reads, once, with the GPU
+doing the averaging during the downscale.
+
+That is what made swapping art styles safe. Redraw the atlas and the overlays
+retune themselves; nothing has to be hand-tuned to a particular set of
+pictures again.
 
 It also got *faster*. Blitting a sprite beats building six gradients per
 piece: the shots harness went from 71.9 ms a frame to 51.8 ms.
@@ -100,23 +119,20 @@ centre of the screen, so any detail painted there is both invisible and
 actively harmful — it would show through the gaps between candies and make
 the grid harder to read.
 
-`art-src/candy-B.png` (generated at 1264x848) — the six bodies:
+`art-src/candy-sheet.png` (generated at 1408x768) — the six bodies:
 
-> A sprite sheet of 6 mobile match-3 game candy jewels arranged in a clean
-> grid with exactly 3 columns and 2 rows, evenly spaced with generous
-> margins, each piece centred in its own cell, all pieces the same overall
-> size. Top row left to right: a glossy crimson red rounded square candy, a
-> glossy orange teardrop droplet, a glossy golden yellow five pointed star.
-> Bottom row left to right: a glossy emerald green hexagon, a glossy sky blue
-> sphere, a glossy violet purple diamond rhombus. Style: hard polished boiled
-> sweet, like glass and enamel, deep jewel tone colours, very high gloss
-> lacquered surface, brilliant tight white specular hotspot upper left,
-> secondary softer highlight, luminous inner glow from the centre, dark
-> saturated edges for depth, thin bright rim light outline, candy crush game
-> art style, vivid, punchy, chunky cartoon proportions with crisp clean
-> edges, 3D rendered icon, studio softbox lighting from upper left. Plain
-> flat uniform mid grey background, no shadows cast on the background, no
-> text, no labels, no extra objects.
+> Six glossy translucent jelly candy icons laid out as a 3 column by 2 row
+> grid, six objects total. Reading order: red rounded square, orange
+> teardrop, yellow star, green hexagon, blue sphere, purple diamond. All six
+> drawn flat and face-on like game icons, straight front view, no
+> perspective, no tilting, no rotation, identical scale, evenly spaced with
+> wide margins. Style: premium glossy translucent gummy candy, deep saturated
+> jewel colour, strong subsurface scattering so light glows through the body,
+> bright sharp specular highlight upper left, soft coloured bounce light
+> along the bottom edge, crisp rim light, smooth rounded bevelled edges, wet
+> shiny surface, high end 3D render, studio lighting from upper left,
+> extremely detailed, clean. Plain flat uniform mid grey background, no cast
+> shadows, no text, no labels, no extra objects.
 
 The six silhouettes deliberately match the shapes `candyPath()` already used
 — square, teardrop, star, hexagon, sphere, rhombus. Distinct shapes, not just
@@ -124,13 +140,28 @@ distinct colours, is what keeps the board readable for colourblind players,
 and keeping the same ones meant the painted art dropped straight into the
 existing layout.
 
-A first attempt asked for *translucent gummy* candies instead. They were
-prettier in isolation and much worse in play: without the dark lacquered edge
-the pieces bled into each other and into the board. Readability at 63-pieces-
-on-screen beat beauty at one.
+### Two styles, and why the softer one won
 
-`art-src/bomb-raw.png` (generated at 1024x1024) is the colour bomb, prompted
-in the same style — a glossy near-black sphere with rainbow sprinkles.
+Two sheets were generated: hard *polished boiled sweet* with a dark lacquered
+edge, and soft *translucent gummy*. The lacquered one was shipped first, on
+the argument that at 63 pieces on screen the dark edge is what stops candies
+bleeding into each other and into the board.
+
+The player preferred the gummy one, and they were right that it looks better.
+The readability worry was real but it was solvable in the wrong place — it was
+being solved by *art* when it should have been solved by *code*. See the
+overlay calibration below: once the stripe and wrapper overlays measure the
+art instead of assuming it, the soft style reads fine.
+
+The softer art does cost about 7 ms a frame more in the software rasteriser,
+because large soft alpha edges are more expensive to blend than hard ones.
+On a GPU it is free.
+
+The colour bomb is a glossy near-black sphere with rainbow sprinkles,
+prompted separately at 1024x1024. Its raw render was lost to a sandbox reset,
+so the build now takes it from `art-src/bomb-cell.png` — the finished 256px
+cell recovered out of the shipped atlas. Same art, already normalised, so it
+skips the cut-and-scale pipeline the candies go through.
 
 `art-src/logo-raw.png` (generated at 1408x768):
 
@@ -160,6 +191,20 @@ Measured on this logo at 560px wide, with alpha:
 | **WebP q82** | **45 KB** | clean, one file, no runtime work |
 
 WebP won on every axis at once, which does not happen often.
+
+### Generating a sheet is a dice roll; generating singles loses consistency
+
+Worth knowing before regenerating anything. Asking for all six on one sheet
+gives **consistent** lighting and framing but an **unreliable** layout — one
+attempt came back as four columns with a stray red blob and no green hexagon
+at all. Asking for six separate images gives a reliable layout but
+inconsistent framing: the green arrived as a tilted pentagon in three-quarter
+perspective while the red and orange were face-on.
+
+Sheets are the right call, because inconsistent lighting across pieces cannot
+be fixed afterwards whereas a bad sheet can simply be re-rolled. Adding
+"flat head-on orthographic view, no perspective tilt, no three-quarter angle"
+to the prompt is what stopped the individual pieces drifting into perspective.
 
 ### Normalising the sheet
 
