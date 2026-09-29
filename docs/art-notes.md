@@ -1,14 +1,14 @@
 # Art notes
 
-The game ships exactly **two** image files. Everything else on screen — every
-candy, every button, every icon, every particle — is drawn from code at
-runtime. That is deliberate: code-drawn art is resolution-independent, can be
-recoloured and squashed per frame, and costs nothing to download.
+The game ships **three** image files, 128 KB in total. Everything else on
+screen — every button, icon, star, particle, stripe and wrapper — is still
+drawn from code at runtime.
 
 | File | Size | What it is |
 |---|---|---|
 | `src/assets/bg.webp` | 19 KB | The painted backdrop |
 | `src/assets/logo.webp` | 45 KB | The `SUGAR RUSH` title lettering |
+| `src/assets/candy-atlas.webp` | 62 KB | Six candy bodies + the colour bomb, 3x3 at 256px |
 
 Both are imported as ES modules, so a normal `npm run build` emits them as
 hashed files and `npm run build:standalone` inlines them as data URLs (its
@@ -23,10 +23,34 @@ lossy codec ever gets.
 The logo is a one-off piece of lettering shown on one screen. Hand-drawing
 that in canvas paths would be a lot of code for a worse result.
 
-Candies are the opposite case on every count. They get tinted to six
-different hues, scaled, squashed, stretched, rotated, given three different
-special overlays and drawn at whatever cell size the screen works out to.
-Sprites would fight all of that, so they stay procedural.
+Candies **were** procedural, on the reasoning that they get scaled, squashed,
+stretched, rotated, overlaid and drawn at arbitrary cell sizes, and sprites
+would fight all of it.
+
+That reasoning was half wrong. Sprites handle every one of those transforms
+perfectly well — the only thing they genuinely cannot do is *recolour*, and
+that was never needed, because six hues means six sprites rather than one
+tinted sprite. What canvas gradients genuinely cannot do is a lacquered edge,
+a luminous core and a tight specular hotspot all at once, and with 63 pieces
+on screen that gap is the entire look of the game.
+
+So the bodies are painted now, and the parts that really do want to be
+procedural still are:
+
+- the **contact shadow**, drawn per piece with `destination-over` so it tucks
+  in behind whatever was composited on top;
+- the **stripe** and **wrapper** overlays, which clip themselves with
+  `source-atop` — that respects the painted silhouette exactly, where a
+  geometric clip path would no longer line up with it.
+
+Stripe contrast adapts to the body: white ribs read beautifully on the
+strawberry and hopelessly on the lemon, because a light candy under light
+stripes just turns white, and a piece you cannot identify by colour is a piece
+you cannot plan a match with. Rib opacity therefore falls as body luminance
+rises, and the contrast comes from a dark separator line instead.
+
+It also got *faster*. Blitting a sprite beats building six gradients per
+piece: the shots harness went from 71.9 ms a frame to 51.8 ms.
 
 ## Regenerating
 
@@ -41,6 +65,19 @@ That needs ImageMagick (`convert`). See `tools/build-art.mjs` for the exact
 pipeline — notably the four-corner flood fill that keys the flat grey field
 out from behind the logo without eating the grey-ish pixels inside the
 artwork, and the format comparison that landed on WebP.
+
+### The palette is sampled, not chosen
+
+`PALETTE` in `src/core/types.ts` is derived from the atlas, so particles,
+glows and combo text match the painted art exactly. For each cell, the mean
+of the mid-tone body pixels is taken with the specular hotspot and the
+lacquer rim excluded from the sample — include them and the "colour" comes
+out as either white or near-black.
+
+`light` / `dark` / `spark` are then derived from that base with saturation
+pushed **up** as lightness rises. Letting it drift down the way a naive HLS
+lightening does produces pastel chalk, and in additive particles a
+desaturated tint reads as grey ash rather than candy.
 
 ### The prompts
 
@@ -62,6 +99,38 @@ The "empty middle" instruction is the load-bearing part. The board covers the
 centre of the screen, so any detail painted there is both invisible and
 actively harmful — it would show through the gaps between candies and make
 the grid harder to read.
+
+`art-src/candy-B.png` (generated at 1264x848) — the six bodies:
+
+> A sprite sheet of 6 mobile match-3 game candy jewels arranged in a clean
+> grid with exactly 3 columns and 2 rows, evenly spaced with generous
+> margins, each piece centred in its own cell, all pieces the same overall
+> size. Top row left to right: a glossy crimson red rounded square candy, a
+> glossy orange teardrop droplet, a glossy golden yellow five pointed star.
+> Bottom row left to right: a glossy emerald green hexagon, a glossy sky blue
+> sphere, a glossy violet purple diamond rhombus. Style: hard polished boiled
+> sweet, like glass and enamel, deep jewel tone colours, very high gloss
+> lacquered surface, brilliant tight white specular hotspot upper left,
+> secondary softer highlight, luminous inner glow from the centre, dark
+> saturated edges for depth, thin bright rim light outline, candy crush game
+> art style, vivid, punchy, chunky cartoon proportions with crisp clean
+> edges, 3D rendered icon, studio softbox lighting from upper left. Plain
+> flat uniform mid grey background, no shadows cast on the background, no
+> text, no labels, no extra objects.
+
+The six silhouettes deliberately match the shapes `candyPath()` already used
+— square, teardrop, star, hexagon, sphere, rhombus. Distinct shapes, not just
+distinct colours, is what keeps the board readable for colourblind players,
+and keeping the same ones meant the painted art dropped straight into the
+existing layout.
+
+A first attempt asked for *translucent gummy* candies instead. They were
+prettier in isolation and much worse in play: without the dark lacquered edge
+the pieces bled into each other and into the board. Readability at 63-pieces-
+on-screen beat beauty at one.
+
+`art-src/bomb-raw.png` (generated at 1024x1024) is the colour bomb, prompted
+in the same style — a glossy near-black sphere with rainbow sprinkles.
 
 `art-src/logo-raw.png` (generated at 1408x768):
 
@@ -91,6 +160,22 @@ Measured on this logo at 560px wide, with alpha:
 | **WebP q82** | **45 KB** | clean, one file, no runtime work |
 
 WebP won on every axis at once, which does not happen often.
+
+### Normalising the sheet
+
+The generator lays the six pieces out on a grid but gives each cell its own
+slightly different grey, so the background is keyed **per tile** from that
+tile's own corner pixel rather than with one global colour.
+
+Each piece is then scaled to a per-shape *reach* — the fraction of the `2r`
+box its bounding box should span — copied straight out of `candyPath()`:
+
+| | square | drop | star | hexagon | sphere | rhombus | bomb |
+|---|---|---|---|---|---|---|---|
+| reach | 0.88 | 0.84 | 1.00 | 0.97 | 0.93 | 0.99 | 0.98 |
+
+Without this the star, which is mostly empty space inside its bounding box,
+would look tiny next to the sphere.
 
 ## How they are used
 

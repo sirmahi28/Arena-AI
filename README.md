@@ -29,15 +29,16 @@ It's built for a phone. On desktop, open devtools and switch to a mobile viewpor
 npm run build:standalone     # → dist-standalone/sugar-rush.html
 ```
 
-That's the entire game — code, art and audio — inlined into a single ~164 KB
+That's the entire game — code, art and audio — inlined into a single ~248 KB
 HTML file. Double-click it, email it to yourself, or copy it onto a phone; it
 needs no server, no install and no network. `npm run verify:standalone` opens
 it over `file://` with **every** network request blocked and checks it still
 boots, paints, takes input and fires its particle effects.
 
-(Nearly all the art and *all* the sound is procedural, which is what makes a
-single file possible at all. The only two binary assets — the painted backdrop
-and the title lettering, 64 KB between them — get base64-inlined. The one
+(Most of the art and *all* the sound is procedural, which is what makes a
+single file possible at all. The three binary assets — the painted backdrop,
+the title lettering and the candy atlas, 128 KB between them — get
+base64-inlined. The one
 remote reference left is the Google Fonts stylesheet, deliberately kept as a
 progressive enhancement: online you get Baloo 2, offline you get the system
 fallback and nothing breaks.)
@@ -188,7 +189,7 @@ src/
     background.ts         painted backdrop + live rays, stars, bokeh
     bloom.ts              two-radius glow post-process (adaptive)
   fx/                     particles, emitters, floaters, screen shake
-  assets/                 the only two image files — see docs/art-notes.md
+  assets/                 the three image files — see docs/art-notes.md
   ui/
     hud.ts  icons.ts      canvas widgets and vector glyphs
   audio/sfx.ts            Web Audio synthesis
@@ -200,19 +201,24 @@ headlessly at thousands of moves per second, without a browser.
 
 ### Two images, and everything else is code
 
-The game ships exactly two binary assets: a painted backdrop (19 KB) and the
-title lettering (45 KB). Every candy, button, icon, star and particle is drawn
-from code at runtime.
+The game ships three binary assets totalling 128 KB: a painted backdrop
+(19 KB), the title lettering (45 KB) and a candy atlas (62 KB — six bodies
+plus the colour bomb, 3x3 at 256px a cell). Every button, icon, star,
+particle, stripe and wrapper is still drawn from code at runtime.
 
-That split is not dogma, it's what each job actually wants. The backdrop never
-moves and never changes colour, so a painting beats a gradient and smooth
-gradients are the best case a lossy codec ever gets — hence 19 KB. The logo is
-one-off lettering on one screen; hand-coding it in canvas paths would be a lot
-of code for a worse result.
+The candies were procedural too, until they weren't. The argument for keeping
+them that way was that they get scaled, squashed, stretched, rotated and drawn
+at arbitrary cell sizes — but sprites do all of that fine. The only thing they
+genuinely can't do is recolour, and that was never needed: six hues means six
+sprites. What canvas gradients genuinely can't do is a lacquered edge, a
+luminous core and a tight specular hotspot at once, and across 63 pieces that
+gap is the whole look of the game. Swapping them in also cut the frame time
+from 71.9 ms to 51.8 ms, because a blit beats six gradients per piece.
 
-Candies are the opposite on every count. They get tinted to six hues, scaled,
-squashed, stretched, rotated, given three different special overlays and drawn
-at whatever cell size the screen works out to. Sprites would fight all of it.
+What stayed procedural is what actually wants to be: the per-piece contact
+shadow (drawn with `destination-over` so it tucks behind), and the stripe and
+wrapper overlays (drawn with `source-atop`, which clips them to the painted
+silhouette exactly — a geometric clip path no longer lines up with it).
 
 `docs/art-notes.md` has the generation prompts, the cut-out pipeline and the
 format comparison that landed on WebP (it beat palette PNG on both size *and*

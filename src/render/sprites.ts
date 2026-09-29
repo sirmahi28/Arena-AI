@@ -1,8 +1,59 @@
 import { BOMB_COLOR, PALETTE, type ColorId, type Special } from '../core/types';
+import atlasUrl from '../assets/candy-atlas.webp';
 
 const TAU = Math.PI * 2;
 
 /** Rounded regular polygon. */
+/**
+ * The candy bodies are a 3x2 sprite atlas: six shapes, six hues, one file.
+ *
+ * They were procedural until they weren't. Canvas gradients can fake a lit
+ * surface, but they cannot do a proper lacquered edge, a luminous core and a
+ * tight specular hotspot at the same time, and at 63 pieces on screen the
+ * difference between "shaded" and "rendered" is the whole look of the game.
+ *
+ * Everything the procedural version was *good* at is still procedural: the
+ * contact shadow below, and the stripe / wrapper overlays on top. So a candy
+ * is still composited at runtime, it just has a painted body now.
+ *
+ * Layout is 3x3. Cells 0-5 are the six candy hues in the same order as
+ * PALETTE and candyPath(); cell 6 is the colour bomb, which has no hue.
+ *
+ * `atlasGen` exists because SpriteCache memoises aggressively and the image
+ * decodes asynchronously — without it, every sprite built during the first
+ * few frames would be permanently cached in its fallback form.
+ */
+const ATLAS_COLS = 3;
+const ATLAS_CELL = 256;
+/** Cell 6 of the atlas is the colour bomb; it has no hue of its own. */
+const ATLAS_BOMB = 6;
+let atlas: HTMLImageElement | null = null;
+let atlasGen = 0;
+
+{
+  const img = new Image();
+  img.decoding = 'async';
+  img.src = atlasUrl;
+  img.onload = () => {
+    atlas = img;
+    atlasGen++;
+  };
+}
+
+function blitAtlas(ctx: CanvasRenderingContext2D, index: number, r: number): void {
+  ctx.drawImage(
+    atlas!,
+    (index % ATLAS_COLS) * ATLAS_CELL,
+    Math.floor(index / ATLAS_COLS) * ATLAS_CELL,
+    ATLAS_CELL,
+    ATLAS_CELL,
+    -r,
+    -r,
+    r * 2,
+    r * 2,
+  );
+}
+
 function roundedPoly(
   ctx: CanvasRenderingContext2D,
   sides: number,
@@ -94,21 +145,36 @@ function candyPath(ctx: CanvasRenderingContext2D, kind: number, r: number): void
   }
 }
 
-function drawBody(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
-  const [base, light, dark, spark] = PALETTE[color % PALETTE.length];
-
-  // ---------------------------------------------------------------- shadow
-  // Contact shadow: wider and softer than the candy, offset down, so the
-  // piece reads as sitting *above* the board rather than painted onto it.
+/**
+ * Contact shadow, drawn *last* with `destination-over` so it lands behind the
+ * finished piece. It used to be drawn first, but the special overlays now
+ * clip themselves with `source-atop` — which respects whatever is already on
+ * the canvas — and a shadow painted first would have caught the stripes.
+ */
+function drawContactShadow(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
   ctx.save();
+  ctx.globalCompositeOperation = 'destination-over';
   ctx.translate(0, r * 0.16);
   ctx.fillStyle = 'rgba(10,3,24,0.42)';
   ctx.filter = `blur(${Math.max(1.5, r * 0.16)}px)`;
   candyPath(ctx, color, r * 0.94);
   ctx.fill();
   ctx.restore();
+}
 
-  // ------------------------------------------------------------------ body
+function drawBody(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
+  const [base, light, dark, spark] = PALETTE[color % PALETTE.length];
+
+  // ------------------------------------------------------------- painted body
+  if (atlas) {
+    blitAtlas(ctx, color % 6, r);
+    return;
+  }
+
+  // ---------------------------------------------- procedural body (fallback)
+  // Still here, and still worth keeping: it is what shows for the handful of
+  // frames before the atlas decodes, and it is the reference the painted art
+  // was matched against.
   // Key light from the upper-left. Four stops instead of three: the extra
   // mid-tone is what stops the sphere reading as a flat disc.
   // Form comes from the *dark* end of the ramp, not from piling on white —
@@ -200,6 +266,15 @@ function drawBody(ctx: CanvasRenderingContext2D, color: ColorId, r: number): voi
 }
 
 /** Darken a hex colour toward black by `k` (0..1 = black..unchanged). */
+/** Perceptual-ish luminance, 0..1, for deciding how hard an overlay can push. */
+function luminance(hex: string): number {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+}
+
 function shade(hex: string, k: number): string {
   const n = parseInt(hex.slice(1), 16);
   const r = Math.round(((n >> 16) & 255) * k);
@@ -215,29 +290,79 @@ function withAlpha(hex: string, a: number): string {
 }
 
 function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, horizontal: boolean): void {
+  const [base, , dark] = PALETTE[color % PALETTE.length];
+  // White ribs read beautifully on the strawberry and hopelessly on the lemon:
+  // a light candy under light stripes just turns white, and a piece you can't
+  // identify by colour is a piece you can't plan a match with. So the ribs get
+  // weaker as the body gets brighter, and earn their contrast from a dark
+  // separator line instead of from sheer brightness.
+  const lum = luminance(base);
+  const peak = 0.74 - 0.36 * lum;
   ctx.save();
-  candyPath(ctx, color, r * 0.97);
-  ctx.clip();
-  ctx.globalAlpha = 0.92;
-  const band = r * 0.2;
-  for (let i = -4; i <= 4; i++) {
-    const o = i * band * 1.85;
+  // `source-atop` clips to the pixels already painted — which is the candy
+  // itself. That matters now the body is a painted sprite: a geometric clip
+  // path would no longer line up with the real silhouette, and the stripes
+  // would spill past the edge.
+  ctx.globalCompositeOperation = 'source-atop';
+
+  // Wide and few. Nine thin ribs turned into mush at 52px a cell; four fat
+  // ones still read as "striped" at a glance, which is the entire job.
+  const band = r * 0.25;
+  for (let i = -3; i <= 3; i++) {
+    const o = i * band * 2.05;
+    // Each band gets a cross-gradient so it reads as a raised rib rather than
+    // a flat painted line, and stays translucent at the edges so the body's
+    // own shading still shows through underneath.
     const grad = horizontal
       ? ctx.createLinearGradient(0, o - band, 0, o + band)
       : ctx.createLinearGradient(o - band, 0, o + band, 0);
-    grad.addColorStop(0, 'rgba(255,255,255,0.35)');
-    grad.addColorStop(0.5, 'rgba(255,255,255,0.98)');
-    grad.addColorStop(1, 'rgba(255,255,255,0.35)');
+    // Translucent on purpose: at full opacity the ribs replaced the candy
+    // instead of marking it, and a striped piece stopped being recognisable
+    // as the colour it still has to match against.
+    grad.addColorStop(0, `rgba(255,255,255,${peak * 0.06})`);
+    grad.addColorStop(0.35, `rgba(255,252,244,${peak * 0.89})`);
+    grad.addColorStop(0.65, `rgba(255,255,255,${peak})`);
+    grad.addColorStop(1, `rgba(255,255,255,${peak * 0.06})`);
     ctx.fillStyle = grad;
     if (horizontal) ctx.fillRect(-r * 1.2, o - band * 0.55, r * 2.4, band * 1.1);
     else ctx.fillRect(o - band * 0.55, -r * 1.2, band * 1.1, r * 2.4);
+
+    // Shadow line under each rib: this is what keeps the lemon legible.
+    ctx.strokeStyle = withAlpha(dark, 0.42);
+    ctx.lineWidth = Math.max(0.6, r * 0.035);
+    ctx.beginPath();
+    if (horizontal) {
+      ctx.moveTo(-r * 1.2, o + band * 0.58);
+      ctx.lineTo(r * 1.2, o + band * 0.58);
+    } else {
+      ctx.moveTo(o + band * 0.58, -r * 1.2);
+      ctx.lineTo(o + band * 0.58, r * 1.2);
+    }
+    ctx.stroke();
   }
+
+  // Painting opaque white ribs over the body flattens the gloss that made it
+  // look 3D, so put a key-light sweep back on top of the whole piece.
+  const gloss = ctx.createRadialGradient(-r * 0.34, -r * 0.46, r * 0.02, -r * 0.1, -r * 0.2, r * 1.25);
+  gloss.addColorStop(0, 'rgba(255,255,255,0.4)');
+  gloss.addColorStop(0.45, 'rgba(255,255,255,0.08)');
+  gloss.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gloss;
+  ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.6, r * 2.6);
+
+  // And a shade in the lower-right, or it reads as a flat sticker.
+  const occ = ctx.createRadialGradient(r * 0.5, r * 0.55, r * 0.05, r * 0.25, r * 0.3, r * 1.15);
+  occ.addColorStop(0, 'rgba(40,10,70,0.34)');
+  occ.addColorStop(1, 'rgba(40,10,70,0)');
+  ctx.fillStyle = occ;
+  ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.6, r * 2.6);
   ctx.restore();
 
-  // Arrow hint of the blast direction
+  // Blast-direction arrows.
   ctx.save();
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = 'rgba(40,12,70,0.75)';
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.globalAlpha = 0.6;
+  ctx.fillStyle = 'rgba(40,12,70,0.8)';
   const a = r * 0.22;
   const drawTri = (x: number, y: number, rot: number) => {
     ctx.save();
@@ -263,12 +388,11 @@ function drawStripes(ctx: CanvasRenderingContext2D, color: ColorId, r: number, h
 
 function drawWrapped(ctx: CanvasRenderingContext2D, color: ColorId, r: number): void {
   const [, light, dark] = PALETTE[color % PALETTE.length];
-  // Foil wrapper corners
+
+  // Foil corners. These deliberately stick out past the candy, so they are
+  // drawn with normal compositing rather than clipped to it — they are the
+  // silhouette cue that says "wrapped" from across the board.
   ctx.save();
-  ctx.globalAlpha = 0.95;
-  ctx.fillStyle = light;
-  ctx.strokeStyle = dark;
-  ctx.lineWidth = Math.max(1, r * 0.06);
   const corners: Array<[number, number, number]> = [
     [-r * 0.82, -r * 0.82, -Math.PI / 4],
     [r * 0.82, -r * 0.82, -Math.PI * 0.75],
@@ -279,6 +403,15 @@ function drawWrapped(ctx: CanvasRenderingContext2D, color: ColorId, r: number): 
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(rot);
+    // Folded foil: lit along the top fold, dark in the crease.
+    const foil = ctx.createLinearGradient(0, -r * 0.34, 0, r * 0.34);
+    foil.addColorStop(0, withAlpha('#ffffff', 0.78));
+    foil.addColorStop(0.42, light);
+    foil.addColorStop(1, shade(dark, 0.8));
+    ctx.fillStyle = foil;
+    ctx.strokeStyle = shade(dark, 0.55);
+    ctx.lineWidth = Math.max(1, r * 0.055);
+    ctx.lineJoin = 'round';
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.lineTo(r * 0.5, -r * 0.34);
@@ -286,34 +419,61 @@ function drawWrapped(ctx: CanvasRenderingContext2D, color: ColorId, r: number): 
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    // Crease highlight down the middle of the fold.
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = Math.max(1, r * 0.035);
+    ctx.beginPath();
+    ctx.moveTo(r * 0.06, 0);
+    ctx.lineTo(r * 0.44, 0);
+    ctx.stroke();
     ctx.restore();
   }
   ctx.restore();
 
-  // Cross ribbon
+  // Ribbon and core sit *on* the candy, so they clip to what is painted.
   ctx.save();
-  candyPath(ctx, color, r * 0.97);
-  ctx.clip();
-  ctx.globalAlpha = 0.55;
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(-r * 1.2, -r * 0.13, r * 2.4, r * 0.26);
-  ctx.fillRect(-r * 0.13, -r * 1.2, r * 0.26, r * 2.4);
-  ctx.restore();
+  ctx.globalCompositeOperation = 'source-atop';
 
-  // Hot core
-  ctx.save();
-  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.55);
-  core.addColorStop(0, 'rgba(255,255,255,0.95)');
-  core.addColorStop(0.5, 'rgba(255,255,255,0.28)');
+  const ribbon = ctx.createLinearGradient(0, -r * 0.16, 0, r * 0.16);
+  ribbon.addColorStop(0, 'rgba(255,255,255,0.06)');
+  ribbon.addColorStop(0.5, 'rgba(255,255,255,0.46)');
+  ribbon.addColorStop(1, 'rgba(255,255,255,0.06)');
+  ctx.fillStyle = ribbon;
+  ctx.fillRect(-r * 1.2, -r * 0.13, r * 2.4, r * 0.26);
+  const ribbonV = ctx.createLinearGradient(-r * 0.16, 0, r * 0.16, 0);
+  ribbonV.addColorStop(0, 'rgba(255,255,255,0.06)');
+  ribbonV.addColorStop(0.5, 'rgba(255,255,255,0.46)');
+  ribbonV.addColorStop(1, 'rgba(255,255,255,0.06)');
+  ctx.fillStyle = ribbonV;
+  ctx.fillRect(-r * 0.13, -r * 1.2, r * 0.26, r * 2.4);
+
+  // Charged core — this is the piece that is about to go off.
+  const core = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.52);
+  core.addColorStop(0, 'rgba(255,255,255,0.62)');
+  core.addColorStop(0.35, 'rgba(255,255,255,0.24)');
   core.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = core;
-  ctx.beginPath();
-  ctx.arc(0, 0, r * 0.55, 0, TAU);
-  ctx.fill();
+  ctx.fillRect(-r * 1.2, -r * 1.2, r * 2.4, r * 2.4);
   ctx.restore();
 }
 
 function drawBomb(ctx: CanvasRenderingContext2D, r: number): void {
+  if (atlas) {
+    blitAtlas(ctx, ATLAS_BOMB, r);
+    // Same contact shadow the candies get, tucked behind.
+    ctx.save();
+    ctx.globalCompositeOperation = 'destination-over';
+    ctx.translate(0, r * 0.12);
+    ctx.fillStyle = 'rgba(10,4,26,0.45)';
+    ctx.filter = `blur(${Math.max(1, r * 0.12)}px)`;
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.94, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  // ------------------------------------------- procedural bomb (fallback)
   // Shadow
   ctx.save();
   ctx.translate(0, r * 0.12);
@@ -385,6 +545,7 @@ export class SpriteCache {
   private cache = new Map<string, HTMLCanvasElement>();
   private cell = 0;
   private dpr = 1;
+  private gen = -1;
 
   ensure(cell: number, dpr: number): void {
     const c = Math.round(cell);
@@ -395,6 +556,11 @@ export class SpriteCache {
   }
 
   get(color: ColorId, special: Special): HTMLCanvasElement {
+    // The atlas decodes after the first sprites are already built and cached.
+    if (this.gen !== atlasGen) {
+      this.gen = atlasGen;
+      this.cache.clear();
+    }
     const key = `${color}|${special}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
@@ -417,6 +583,8 @@ export class SpriteCache {
       if (special === 'stripeH') drawStripes(ctx, color, r, true);
       else if (special === 'stripeV') drawStripes(ctx, color, r, false);
       else if (special === 'wrapped') drawWrapped(ctx, color, r);
+      // Last, so `destination-over` tucks it behind the finished piece.
+      drawContactShadow(ctx, color, r);
     }
 
     this.cache.set(key, cv);
