@@ -13,6 +13,12 @@ every sound is synthesised with the Web Audio API, and the whole thing ships in
 
 ---
 
+## Play it
+
+**→ [sirmahi28.github.io/Arena-AI](https://sirmahi28.github.io/Arena-AI/)**
+
+Nothing to install. It works on a phone.
+
 ## Run it
 
 ```bash
@@ -29,11 +35,23 @@ It's built for a phone. On desktop, open devtools and switch to a mobile viewpor
 npm run build:standalone     # → dist-standalone/sugar-rush.html
 ```
 
-That's the entire game — code, art and audio — inlined into a single ~240 KB
+That's the entire game — code, art and audio — inlined into a single ~310 KB
 HTML file. Double-click it, email it to yourself, or copy it onto a phone; it
 needs no server, no install and no network. `npm run verify:standalone` opens
 it over `file://` with **every** network request blocked and checks it still
 boots, paints, takes input and fires its particle effects.
+
+That same file is what gets published:
+
+```bash
+npm run build:pages          # → docs/index.html
+```
+
+GitHub Pages can only serve the repository root or `/docs` when deploying from
+a branch, and the root `index.html` is the Vite dev entry pointing at
+uncompiled TypeScript. So `/docs` gets the single-file build, which needs no
+build step on their side — no Actions workflow and no `github-pages`
+environment branch policy to negotiate.
 
 (Most of the art and *all* the sound is procedural, which is what makes a
 single file possible at all. The three binary assets — the painted backdrop,

@@ -17,7 +17,8 @@
     "shots": "node tools/shots.mjs",
     "fx": "node tools/fx-probe.mjs tools/fx-out",
     "setup:chromium": "node tools/setup-chromium.mjs",
-    "art": "node tools/build-art.mjs"
+    "art": "node tools/build-art.mjs",
+    "build:pages": "npm run build:standalone && node tools/build-pages.mjs"
   },
   "devDependencies": {
     "playwright": "^1.49.1",
